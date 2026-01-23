@@ -76,13 +76,16 @@ You should see `nexgensis-frontend` and `nexgensis-backend` with a status of `Up
 For a better understanding of the project's evolution and technical choices:
 - 📖 **[Deployment Journey (Deployment.md)](file:///home/rohit/Rohit/Nexgensis-devops-assessment/Deployment.md)**: Every technical "Why" and "How" with code snippets.
 - 🚧 **[Challenges Log (CHALLENGES.md)](file:///home/rohit/Rohit/Nexgensis-devops-assessment/CHALLENGES.md)**: Problems encountered during deployment and how they were solved.
+- 🚀 **[CI/CD Pipeline (CICD.md)](file:///home/rohit/Rohit/Nexgensis-devops-assessment/CICD.md)**: Advanced GitHub Actions workflows for AWS ECR deployments.
 
 ---
 
 ## ⚙️ Architecture Summary
 - **Backend**: Django 6.0 + Gunicorn (Non-root user).
 - **Frontend**: React + Vite + Serve (Non-root user, multi-stage optimized).
+- **Deployment**: Secure AWS OIDC authentication (Follow [OIDC Setup Instructions](file:///home/rohit/Rohit/Nexgensis-devops-assessment/CICD.md#%EF%B8%8F-aws-oidc-setup-identity-provider)).
 - **Network**: Isolated Docker bridge network where `frontend` connects to `backend`.
+- **CI/CD**: Automates Docker builds and ECR pushes with **automated repository creation**.
 
 ---
 *Maintained by Antigravity AI for Nexgensis.*

@@ -1,0 +1,81 @@
+name: Frontend Docker Build & Push to ECR
+
+on:
+  push:
+    branches: [ main, DEV, QA, PREPROD ]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-img-push.yaml'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  IMAGE_NAME: nexgensis-frontend
+  IMAGE_REPO: nexgensis
+  AWS_REGION: us-east-1 # Change this to your region
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set environment variables
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            DEV)
+              ENV=dev
+              IMAGE_TAG=dev-latest
+              ;;
+            QA)
+              ENV=qa
+              IMAGE_TAG=qa-latest
+              ;;
+            PREPROD)
+              ENV=preprod
+              IMAGE_TAG=preprod-latest
+              ;;
+            main)
+              ENV=prod
+              IMAGE_TAG=prod-latest
+              ;;
+          esac
+
+          echo "ENV=$ENV" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-cicd
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ECR_REGISTRY }}
+
+      - name: Create ECR repository if not exists
+        run: |
+          aws ecr describe-repositories --repository-names ${{ env.IMAGE_REPO }}/${{ env.IMAGE_NAME }} || \
+          aws ecr create-repository --repository-name ${{ env.IMAGE_REPO }}/${{ env.IMAGE_NAME }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ secrets.ECR_REGISTRY }}/${{ env.IMAGE_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ secrets.ECR_REGISTRY }}/${{ env.IMAGE_REPO }}/${{ env.IMAGE_NAME }}:${{ env.SHORT_SHA }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
