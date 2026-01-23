@@ -145,3 +145,30 @@ If the target server is a fresh AMI:
 - **Handled**: The **Dependency Guard** in `cicd.yaml` will automatically install Docker and AWS CLI during the first deployment.
 
 ---
+
+### D. Malformed SSH_PRIVATE_KEY
+If the pipeline fails at the "Prepare SSH Identity" step:
+- **Error**: `id_rsa is not a key file` or `The provided SSH_PRIVATE_KEY is malformed`.
+- **Diagnostics**: Check the **"SSH Key Diagnostic Info"** printout in the GitHub Action logs.
+- **Common Fixes**:
+  - Ensure the key includes the `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines.
+  - Check that the key is **not** base64 encoded when pasted into GitHub Secrets (it should be raw text).
+  - Avoid extra spaces at the end of the key.
+
+---
+
+## 🛡️ 6. Smart Resource Reuse & Idempotency
+
+To ensure 100% reliability, the infrastructure supports **Conditional Creation**.
+
+### A. Bypassing "EntityAlreadyExists"
+If an IAM role already exists in your AWS account and you want to reuse it instead of creating a new one:
+1.  Set `create_iam_role = false` in your variables.
+2.  Specify the name in `existing_iam_role_name`.
+
+This tells Terraform to use a **`data` source** to fetch the existing role instead of attempting a `resource` creation, completely bypassing the 409 Conflict error.
+
+### B. Collision Resilience (`name_prefix`)
+For resources where uniqueness is desired but collisions are common (Security Groups), we use `name_prefix`. This allows AWS to generate a unique suffix, ensuring the `apply` always succeeds.
+
+---
