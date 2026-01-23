@@ -33,4 +33,5 @@ module "ec2" {
   backend_env        = var.backend_env
   frontend_repo      = var.frontend_repo_name
   backend_repo       = var.backend_repo_name
+  key_name           = var.key_name
 }
