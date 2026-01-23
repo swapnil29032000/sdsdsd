@@ -124,7 +124,24 @@ sudo docker compose up -d --remove-orphans
 
 ---
 
-## 🚦 Branch & Environment Mapping
-- **`main`** ⮕ `prod-latest`
-- **`QA`** ⮕ `qa-latest`
-- **`DEV`** ⮕ `dev-latest`
+## 🛠️ 5. Troubleshooting & Connectivity
+
+### A. SSH Permission Denied (UNPROTECTED PRIVATE KEY)
+**Error**: `WARNING: UNPROTECTED PRIVATE KEY FILE! Permissions 0664 for 'my-aws.pem' are too open.`
+**Cause**: OpenSSH rejects keys that are readable by other users on your system.
+**Fix**:
+```bash
+chmod 400 my-aws.pem
+ssh -i my-aws.pem ubuntu@<INSTANCE_IP>
+```
+
+### B. Deployment Timing Gaps
+If you receive `Connection Refused` immediately after infrastructure creation:
+- **Reason**: AWS EC2 instances report "Running" before the OS boot process is complete.
+- **Handled**: Our pipeline includes an automated retry loop that waits up to 5 minutes for the host to become reachable.
+
+### C. Missing Host Dependencies
+If the target server is a fresh AMI:
+- **Handled**: The **Dependency Guard** in `cicd.yaml` will automatically install Docker and AWS CLI during the first deployment.
+
+---

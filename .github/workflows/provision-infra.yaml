@@ -1,0 +1,70 @@
+name: Manual Infrastructure Provisioning
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Environment to provision (DEV, QA, PREPROD, main)'
+        required: true
+        default: 'DEV'
+      action:
+        description: 'Terraform Action (apply or destroy)'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - apply
+          - destroy
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Execution
+        run: |
+          terraform init
+          
+          # Mapping friendly name to image tags (even though this is infra-only, modules expect them)
+          case "${{ github.event.inputs.target_env }}" in
+            DEV) TAG=dev-latest ;;
+            QA) TAG=qa-latest ;;
+            PREPROD) TAG=preprod-latest ;;
+            main) TAG=prod-latest ;;
+          esac
+
+          if [ "${{ github.event.inputs.action }}" == "apply" ]; then
+            terraform apply -auto-approve \
+              -var="ecr_registry=${{ env.ECR_REGISTRY }}" \
+              -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="frontend_repo_name=nexgensis-frontend" \
+              -var="backend_repo_name=nexgensis-backend" \
+              -var="frontend_image_tag=$TAG" \
+              -var="backend_image_tag=$TAG"
+          else
+            terraform destroy -auto-approve \
+              -var="ecr_registry=${{ env.ECR_REGISTRY }}" \
+              -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="frontend_repo_name=nexgensis-frontend" \
+              -var="backend_repo_name=nexgensis-backend"
+          fi
+        working-directory: ./terraform

@@ -201,8 +201,15 @@ jobs:
       - name: Prepare SSH Identity & Wait
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          # Use printf to preserve exact formatting and ensure trailing newline
+          printf "%s\n" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          
+          # Validate the key format
+          if ! ssh-keygen -l -f ~/.ssh/id_rsa; then
+            echo "Error: The provided SSH_PRIVATE_KEY is malformed or invalid."
+            exit 1
+          fi
           
           echo "Waiting for SSH on ${{ needs.infrastructure.outputs.instance_ip }}..."
           for i in {1..30}; do
