@@ -79,6 +79,11 @@ Navigate to **Settings > Secrets and variables > Actions** in your repository an
 | :--- | :--- | :--- |
 | `AWS_ACCOUNT_ID` | Your 12-digit AWS Account ID | `123456789012` |
 | `ECR_REGISTRY` | The URI of your ECR registry | `123456789012.dkr.ecr.us-east-1.amazonaws.com` |
+| `FE_PROD_ENV` | Frontend production `.env` contents | `VITE_API_URL=...` |
+| `FE_DEFAULT_ENV` | Fallback `.env` for Frontend | `VITE_API_URL=...` |
+
+> [!IMPORTANT]
+> **Backend Secrets**: Backend images do **not** have secrets baked into them during the build process. You must configure environment variables (or the `.env` file) directly in your deployment platform (e.g., AWS ECS Task Definition, K8s Secrets, or local Docker Compose).
 
 ---
 

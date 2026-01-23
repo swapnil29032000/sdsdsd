@@ -7,7 +7,7 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - ./backend/.env
+      - .env
     volumes:
       - backend_data:/app
     restart: unless-stopped

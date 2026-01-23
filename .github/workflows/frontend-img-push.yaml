@@ -24,26 +24,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set environment variables
+      - name: Set environment variables & Generate .env
         run: |
           case "${GITHUB_REF_NAME}" in
             DEV)
               ENV=dev
               IMAGE_TAG=dev-latest
+              SELECTED_SECRET="${{ secrets.FE_DEV_ENV }}"
               ;;
             QA)
               ENV=qa
               IMAGE_TAG=qa-latest
+              SELECTED_SECRET="${{ secrets.FE_QA_ENV }}"
               ;;
             PREPROD)
               ENV=preprod
               IMAGE_TAG=preprod-latest
+              SELECTED_SECRET="${{ secrets.FE_PREPROD_ENV }}"
               ;;
             main)
               ENV=prod
               IMAGE_TAG=prod-latest
+              SELECTED_SECRET="${{ secrets.FE_PROD_ENV }}"
               ;;
           esac
+
+          # Handle fallback to default env
+          if [ -z "$SELECTED_SECRET" ]; then
+            SELECTED_SECRET="${{ secrets.FE_DEFAULT_ENV }}"
+          fi
+
+          if [ -n "$SELECTED_SECRET" ]; then
+            printf "%s" "$SELECTED_SECRET" > ./frontend/.env
+            echo ".env generated for $ENV"
+          fi
 
           echo "ENV=$ENV" >> $GITHUB_ENV
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV

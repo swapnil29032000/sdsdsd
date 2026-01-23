@@ -85,7 +85,7 @@ For a better understanding of the project's evolution and technical choices:
 - **Frontend**: React + Vite + Serve (Non-root user, multi-stage optimized).
 - **Deployment**: Secure AWS OIDC authentication (Follow [OIDC Setup Instructions](file:///home/rohit/Rohit/Nexgensis-devops-assessment/CICD.md#%EF%B8%8F-aws-oidc-setup-identity-provider)).
 - **Network**: Isolated Docker bridge network where `frontend` connects to `backend`.
-- **CI/CD**: Automates Docker builds and ECR pushes with **automated repository creation**.
+- **CI/CD**: Automates Docker builds and ECR pushes with **automated repository creation** and **secure frontend build-time secret injection**. Backend secrets are managed at runtime.
 
 ---
 *Maintained by Antigravity AI for Nexgensis.*
