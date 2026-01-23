@@ -1,88 +1,60 @@
-# 🎯 Production-Ready Setup Guide
+# DevOps Assessment Application
 
-This guide is designed for any developer to get the **Nexgensis DevOps Assessment** stack running in under 2 minutes, without needing to ask a single question.
+A simple "Hello World" full-stack application built with **Django** (Backend) and **React with Vite** (Frontend).
 
----
+## Project Overview
 
-## 📋 Prerequisites
+- **Backend**: Django 6.0 (REST API)
+- **Frontend**: React (Vite, TypeScript, Lucide Icons)
+- **Styling**: Premium custom CSS with dark/light mode support.
+- **Communication**: REST API using Axios with CORS enabled.
 
-Before you begin, ensure you have the following installed:
-- **Docker**: [Install Docker](https://docs.docker.com/get-docker/)
-- **Docker Compose**: Usually included with Docker Desktop.
-- **Git**: To clone the repository.
+## Getting Started
 
----
+### Prerequisites
+- Python 3.10+
+- Node.js 18+
+- npm 9+
 
-## � Quick Start (Automated)
+### Backend Setup (Django)
 
-We have provided a unified orchestration setup that configures networking, dependencies, and environment variables automatically.
+1. Navigate to the backend directory:
+   ```bash
+   cd backend
+   ```
+2. Create and activate a virtual environment:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+3. Install dependencies:
+   ```bash
+   pip install django django-cors-headers psycopg2-binary
+   ```
+4. Run the development server:
+   ```bash
+   python manage.py runserver
+   ```
+   The backend will be available at `http://localhost:8000/api/hello/`.
 
-### 1. Zero-Config Environment Setup
-The applications require specific environment variables to communicate. Copy the templates provided:
+### Frontend Setup (React/Vite)
 
-```bash
-# From the project root
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-```
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Run the development server:
+   ```bash
+   npm run dev
+   ```
+   The frontend will be available at `http://localhost:5173/`.
 
-### 2. Launch the Stack
-Run the following command to build the images and start the services in detached mode:
-
-```bash
-docker compose up -d --build
-```
-
-*Note: The `--build` flag ensures any recent code changes are reflected in the new images.*
-
-### 3. Verify Health
-Check if the containers are running:
-
-```bash
-docker compose ps
-```
-
-You should see `nexgensis-frontend` and `nexgensis-backend` with a status of `Up`.
-
----
-
-## 🌐 Application Access
-
-| Component | URL | Description |
-| :--- | :--- | :--- |
-| **Frontend UI** | [http://localhost:5173](http://localhost:5173) | The main React dashboard. |
-| **Backend API** | [http://localhost:8000/api/hello/](http://localhost:8000/api/hello/) | The Django API endpoint. |
-
----
-
-## 🛠 Troubleshooting & FAQs
-
-### "Frontend says Connection Failed"
-- **Reason**: The frontend is trying to reach the API at `localhost:8000`. Ensure the backend container is up.
-- **Fix**: Run `docker compose logs backend` to check for Django startup errors (e.g., database migrations).
-
-### "I changed the code but the UI didn't update"
-- **Reason**: Since we use multi-stage production builds, the code is "baked" into the image.
-- **Fix**: Re-run the launch command with the `--build` flag: `docker compose up -d --build`.
-
-### "How do I see the logs?"
-- To see live logs: `docker compose logs -f`
-- To see specific service logs: `docker compose logs -f frontend`
-
----
-
-## � Deep Dive Documentation
-
-For a better understanding of the project's evolution and technical choices:
-- 📖 **[Deployment Journey (Deployment.md)](file:///home/rohit/Rohit/Nexgensis-devops-assessment/Deployment.md)**: Every technical "Why" and "How" with code snippets.
-- 🚧 **[Challenges Log (CHALLENGES.md)](file:///home/rohit/Rohit/Nexgensis-devops-assessment/CHALLENGES.md)**: Problems encountered during deployment and how they were solved.
-
----
-
-## ⚙️ Architecture Summary
-- **Backend**: Django 6.0 + Gunicorn (Non-root user).
-- **Frontend**: React + Vite + Serve (Non-root user, multi-stage optimized).
-- **Network**: Isolated Docker bridge network where `frontend` connects to `backend`.
-
----
-*Maintained by Antigravity AI for Nexgensis.*
+## Architecture Decisions
+- **Vite**: Used for its superior development experience and fast build times.
+- **Django**: Chosen for its robustness and ease of setting up a structured API.
+- **CORS**: Configured in Django to allow the React frontend to fetch data during local development.
+- **Responsive Design**: Custom CSS ensures the application looks premium on all screen sizes and supports dark mode.
