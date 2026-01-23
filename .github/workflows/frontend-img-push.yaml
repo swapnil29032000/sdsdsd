@@ -14,7 +14,7 @@ permissions:
 env:
   IMAGE_NAME: nexgensis-frontend
   IMAGE_REPO: nexgensis
-  AWS_REGION: us-east-1 # Change this to your region
+  AWS_REGION: ap-south-1
 
 jobs:
   build-push:
