@@ -1,5 +1,5 @@
 resource "aws_security_group" "nexgensis_sg" {
-  name        = "nexgensis-sg"
+  name_prefix = "nexgensis-sg-"
   description = "Allow HTTP, HTTPS and SSH"
   vpc_id      = var.vpc_id
 

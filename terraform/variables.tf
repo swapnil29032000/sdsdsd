@@ -45,3 +45,15 @@ variable "key_name" {
   type        = string
   default     = "my-aws"
 }
+
+variable "create_iam_role" {
+  description = "Whether to create a new IAM role or reuse an existing one"
+  type        = bool
+  default     = true
+}
+
+variable "existing_iam_role_name" {
+  description = "The name of an existing IAM role to use if create_iam_role is false"
+  type        = string
+  default     = "nexgensis-ec2-ecr-role"
+}

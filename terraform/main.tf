@@ -17,7 +17,9 @@ module "vpc" {
 }
 
 module "iam" {
-  source = "./modules/iam"
+  source             = "./modules/iam"
+  create_role        = var.create_iam_role
+  existing_role_name = var.existing_iam_role_name
 }
 
 module "ec2" {
