@@ -41,8 +41,34 @@ Generated a pinned `requirements.txt` by analyzing the project imports and setti
 
 ---
 
-## 5. Infrastructure as Code (IaC) Complexity
+---
+
+## 6. Organizational Action Restrictions
 ### **The Problem**
-Moving from local Docker to a Cloud VM requires manual setup of Docker, security groups, and ECR access, which is prone to human error.
+Security policies blocked third-party actions like `dorny/paths-filter`.
 ### **The Solution**
-We implemented **Infrastructure as Code (IaC)** using Terraform. This ensures that every time we deploy to AWS, the security groups (80, 443, 22) and IAM roles are identical. We also used a `user_data` script to automate the entire server configuration, so the application starts running the moment the EC2 instance is live.
+We replaced external actions with **native Git commands** and shell logic in the workflow. This achieved identical path-based filtering while complying with 100% of the repository's security policies.
+
+---
+
+## 7. Malformed SSH Secrets & "Connection Refused"
+### **The Problem**
+Copy-paste errors in `SSH_PRIVATE_KEY` (missing footers/new lines) lead to fragile deployments and manual intervention.
+### **The Solution**
+We pivoted to **AWS Systems Manager (SSM)**. By using AWS-native session management, we completely removed the need for SSH keys and Port 22, making the connection 100% reliable and significantly more secure.
+
+---
+
+## 8. Terraform "Already Exists" (Idempotency)
+### **The Problem**
+Redeployments would fail if IAM roles or Security Groups already existed in the account.
+### **The Solution**
+Implemented **Smart Resource Reuse**. By using `name_prefix` and conditional `data/resource` toggles, Terraform now intelligently detects existing infrastructure and reuses it instead of erroring out.
+
+---
+
+## 9. EC2 Boot Timing Gaps
+### **The Problem**
+Deployments failed because they started after the instance was "Running" but before the OS or SSM agent was fully initialized.
+### **The Solution**
+Implemented a robust **SSM Readiness Waiter** in the CI/CD pipeline that polls the agent status for up to 5 minutes, ensuring the environment is truly ready for deployment.

@@ -1,6 +1,6 @@
 # 🛠️ DevOps, Infrastructure & Deployment Guide
 
-This document is the **single source of truth** for the Nexgensis technical stack, covering AWS security, modular infrastructure, and the unified GitOps pipeline.
+This document is the **single source of truth** for the Nexgensis technical stack, covering AWS security, modular infrastructure, and the unified SSH-less (SSM) GitOps pipeline.
 
 ---
 
@@ -10,14 +10,6 @@ To successfully run this pipeline, two specific IAM configuration sets are requi
 
 ### A. GitHub Actions (OIDC Role)
 We use **OpenID Connect (OIDC)** to authenticate GitHub with AWS without storing permanent keys.
-```yaml
-# Permission required in cicd.yaml
-permissions:
-  id-token: write
-  contents: read
-```
-
-The IAM role assumed by GitHub must have a policy allowing management of the following services:
 ```json
 {
   "Version": "2012-10-17",
@@ -25,7 +17,8 @@ The IAM role assumed by GitHub must have a policy allowing management of the fol
     {
       "Effect": "Allow",
       "Action": [
-        "ecr:*", "ec2:*", "iam:*", "vpc:*", "s3:*"
+        "ecr:*", "ec2:*", "iam:*", "vpc:*", "s3:*", 
+        "ssm:SendCommand", "ssm:DescribeInstanceInformation"
       ],
       "Resource": "*"
     }
@@ -34,7 +27,9 @@ The IAM role assumed by GitHub must have a policy allowing management of the fol
 ```
 
 ### B. EC2 Instance Profile
-The application server requires a role with the `AmazonEC2ContainerRegistryReadOnly` policy attached, allowing it to pull images from AWS ECR securely.
+The application server requires a role with:
+- `AmazonEC2ContainerRegistryReadOnly` (to pull images)
+- `AmazonSSMManagedInstanceCore` (to enable SSH-less deployment via SSM)
 
 ---
 
@@ -42,21 +37,15 @@ The application server requires a role with the `AmazonEC2ContainerRegistryReadO
 
 The infrastructure is built using reusable modules for networking, compute, and security.
 
-```hcl
-# Example module integration from main.tf
-module "vpc" { source = "./modules/vpc" }
-module "ec2" {
-  source           = "./modules/ec2"
-  vpc_id           = module.vpc.vpc_id
-  subnet_id        = module.vpc.public_subnet_id
-  key_name         = "my-aws"
-}
-```
-
 ### Essential Security Rules
 The following Ports are open on the infrastructure level:
 - **Port 80**: Application Frontend (Public).
-- **Port 22**: Administrative SSH Access.
+- **Port 22**: Administrative SSH Access (Optional, can be closed for max security).
+
+> [!NOTE]
+> Our deployment process **does not use SSH (Port 22)**. It uses AWS Systems Manager (SSM) to securely tunnel commands to the server.
+
+---
 
 ---
 
@@ -65,9 +54,9 @@ The following Ports are open on the infrastructure level:
 The project uses a single **Production Pipeline** to orchestrate the "Build-First" strategy.
 
 ### ⚡ Intelligent Build Triggers
-We use path-based filtering to skip redundant builds.
+We use native path-based filtering to skip redundant builds and optimize resource usage.
 ```yaml
-# Snippet from cicd.yaml
+# Logic in cicd.yaml
 backend:
   - 'backend/**'
 frontend:
@@ -75,41 +64,19 @@ frontend:
 ```
 
 ### 🛡️ Robust Secret Selection & Fallback
-The pipeline intelligently selects branch-specific secrets (e.g., `BE_DEV_ENV`) and automatically falls back to **`BE_DEFAULT_ENV`** if they are missing or empty.
+The pipeline intelligently selects environment-specific secrets (e.g., `BE_DEV_ENV`) based on the active branch and automatically falls back to **`BE_DEFAULT_ENV`** if a specific secret is missing or empty. This prevents pipeline failures due to unset secrets.
+
+### 🌉 The SSM Deployment Guard (SSH-less)
+Instead of error-prone SSH keys, the pipeline uses **AWS Systems Manager (SSM)**.
 ```bash
-# Selection logic flow
-If BRANCH_SECRET exists -> Use it
-Else -> Fallback to BE_DEFAULT_ENV
-```
-
----
-
-## � 4. Resilient Deployment & Zero-Downtime
-
-### 🌉 The SSH Health Guard
-Upon provisioning new infrastructure, the pipeline uses a retry loop to wait for the OS and SSH service to reach a "Ready" state.
-```bash
-for i in {1..30}; do
-  ssh-keyscan -H $IP >> ~/.ssh/known_hosts && \
-  ssh -i key.pem ubuntu@$IP "echo Ready" && break
-  sleep 10
-done
-```
-
-### 🛠️ Auto-Healing Dependency Guard
-The deployment script automatically detects and installs missing dependencies (**Docker, AWS CLI, Docker Compose**) on the target host.
-```bash
-if ! command -v docker &> /dev/null; then
-  sudo apt-get update && sudo apt-get install -y docker.io
-fi
+aws ssm send-command \
+  --instance-ids "$INSTANCE_ID" \
+  --document-name "AWS-RunShellScript" \
+  --parameters "commands=['sudo docker compose pull', 'sudo docker compose up -d']"
 ```
 
 ### 💎 Zero-Downtime Rolling Update
-We download new images first and then recreate containers locally to avoid any service interruption.
-```bash
-sudo docker compose pull
-sudo docker compose up -d --remove-orphans
-```
+The deployment strategy ensures that new images are pulled **before** the existing containers are recreated. Combined with Docker's `--remove-orphans`, this minimizes service interruption during updates.
 
 ---
 
@@ -119,56 +86,40 @@ sudo docker compose up -d --remove-orphans
 | :--- | :--- |
 | `AWS_ACCOUNT_ID` | Your 12-digit AWS Account ID. |
 | `ECR_REGISTRY` | The URI of your AWS ECR Registry. |
-| `SSH_PRIVATE_KEY` | The contents of your `my-aws.pem` file. |
-| `BE_DEFAULT_ENV` | Fallback environment variables for the backend. |
+| `BE_PROD_ENV` / `BE_DEFAULT_ENV` | Django environment variables. |
+
+> [!IMPORTANT]
+> **No SSH_PRIVATE_KEY is required.** The pipeline is fully managed via AWS-native permissions.
 
 ---
 
-## 🛠️ 5. Troubleshooting & Connectivity
+## 🛠️ 4. Troubleshooting & Connectivity
 
-### A. SSH Permission Denied (UNPROTECTED PRIVATE KEY)
-**Error**: `WARNING: UNPROTECTED PRIVATE KEY FILE! Permissions 0664 for 'my-aws.pem' are too open.`
-**Cause**: OpenSSH rejects keys that are readable by other users on your system.
-**Fix**:
-```bash
-chmod 400 my-aws.pem
-ssh -i my-aws.pem ubuntu@<INSTANCE_IP>
-```
+### A. Deployment via SSM Fails
+- **Check Instance Status**: The instance must be "Online" in AWS SSM Fleet Manager.
+- **IAM Consistency**: Ensure the EC2 Instance Profile has `AmazonSSMManagedInstanceCore` attached.
+- **Wait Time**: For fresh instances, it can take 2-3 minutes for the SSM agent to start after boot.
 
-### B. Deployment Timing Gaps
-If you receive `Connection Refused` immediately after infrastructure creation:
-- **Reason**: AWS EC2 instances report "Running" before the OS boot process is complete.
-- **Handled**: Our pipeline includes an automated retry loop that waits up to 5 minutes for the host to become reachable.
-
-### C. Missing Host Dependencies
-If the target server is a fresh AMI:
-- **Handled**: The **Dependency Guard** in `cicd.yaml` will automatically install Docker and AWS CLI during the first deployment.
+### B. Smart Resource Reuse
+If you receive `EntityAlreadyExists` for an IAM role:
+- Set `create_iam_role = false` and `existing_iam_role_name = "your-role-name"` in your terraform variables.
 
 ---
 
-### D. Malformed SSH_PRIVATE_KEY
-If the pipeline fails at the "Prepare SSH Identity" step:
-- **Error**: `id_rsa is not a key file` or `The provided SSH_PRIVATE_KEY is malformed`.
-- **Diagnostics**: Check the **"SSH Key Diagnostic Info"** printout in the GitHub Action logs.
-- **Common Fixes**:
-  - Ensure the key includes the `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines.
-  - Check that the key is **not** base64 encoded when pasted into GitHub Secrets (it should be raw text).
-  - Avoid extra spaces at the end of the key.
-
----
-
-## 🛡️ 6. Smart Resource Reuse & Idempotency
-
-To ensure 100% reliability, the infrastructure supports **Conditional Creation**.
+## 🛡️ 5. Smart Resource Reuse & Idempotency
 
 ### A. Bypassing "EntityAlreadyExists"
-If an IAM role already exists in your AWS account and you want to reuse it instead of creating a new one:
-1.  Set `create_iam_role = false` in your variables.
-2.  Specify the name in `existing_iam_role_name`.
-
-This tells Terraform to use a **`data` source** to fetch the existing role instead of attempting a `resource` creation, completely bypassing the 409 Conflict error.
+If an IAM role already exists in your AWS account, set `create_iam_role = false` to use a **`data` source** to fetch it instead of attempting a `resource` creation.
 
 ### B. Collision Resilience (`name_prefix`)
-For resources where uniqueness is desired but collisions are common (Security Groups), we use `name_prefix`. This allows AWS to generate a unique suffix, ensuring the `apply` always succeeds.
+We use `name_prefix` for Security Groups and IAM roles to allow AWS to generate unique suffixes, ensuring the `apply` always succeeds.
 
 ---
+
+## 🗺️ 6. The Project Journey & Challenges
+
+Building this pipeline involved overcoming several major technical hurdles (SSM, Smart Reuse, OIDC security, etc.).
+
+For a detailed chronological account of every challenge we faced and exactly how we solved it, please refer to the dedicated:
+
+👉 **[CHALLENGES.md](file:///home/rohit/Rohit/Nexgensis-devops-assessment/CHALLENGES.md)**

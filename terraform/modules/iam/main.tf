@@ -28,6 +28,12 @@ resource "aws_iam_role_policy_attachment" "ecr_read_only" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
+resource "aws_iam_role_policy_attachment" "ssm_managed" {
+  count      = var.create_role ? 1 : 0
+  role       = aws_iam_role.ec2_ecr_role[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 resource "aws_iam_instance_profile" "ec2_profile" {
   name_prefix = "nexgensis-ec2-profile-"
   role        = var.create_role ? aws_iam_role.ec2_ecr_role[0].name : data.aws_iam_role.existing[0].name

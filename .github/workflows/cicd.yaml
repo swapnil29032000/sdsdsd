@@ -196,50 +196,13 @@ jobs:
     if: always() && needs.infrastructure.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Prepare SSH Identity & Wait
-        run: |
-          mkdir -p ~/.ssh
-          # Use a heredoc to write the key to avoid shell interpretation issues
-          cat <<'EOF' > ~/.ssh/id_rsa
-          ${{ secrets.SSH_PRIVATE_KEY }}
-          EOF
-          
-          # Fix potential literal \n strings if they exist
-          if grep -q "\\\\n" ~/.ssh/id_rsa; then
-            echo "Detected literal \n strings, converting to real newlines..."
-            sed -i 's/\\n/\n/g' ~/.ssh/id_rsa
-          fi
-
-          # Ensure there's a trailing newline
-          sed -i '$a\' ~/.ssh/id_rsa
-          
-          chmod 600 ~/.ssh/id_rsa
-          
-          # Validate the key format with non-leaking diagnostics
-          if ! ssh-keygen -l -f ~/.ssh/id_rsa; then
-            echo "--- SSH Key Diagnostic Info (SAFE) ---"
-            echo "Size: $(stat -c%s ~/.ssh/id_rsa) bytes"
-            echo "Header present: $(grep -q "BEGIN" ~/.ssh/id_rsa && echo "Yes" || echo "No")"
-            echo "Footer present: $(grep -q "END" ~/.ssh/id_rsa && echo "Yes" || echo "No")"
-            echo "Line count: $(wc -l < ~/.ssh/id_rsa)"
-            echo "---------------------------------------"
-            echo "Error: The provided SSH_PRIVATE_KEY is malformed or invalid."
-            echo "Please ensure you copied the FULL key including BEGIN/END lines."
-            exit 1
-          fi
-          
-          echo "Waiting for SSH on ${{ needs.infrastructure.outputs.instance_ip }}..."
-          for i in {1..30}; do
-            ssh-keyscan -H ${{ needs.infrastructure.outputs.instance_ip }} >> ~/.ssh/known_hosts && \
-            ssh -o ConnectTimeout=5 -i ~/.ssh/id_rsa ubuntu@${{ needs.infrastructure.outputs.instance_ip }} "echo Ready" && break
-            sleep 10
-          done
-
-      - name: Resilient Deploy
-        env:
-          EC2_IP: ${{ needs.infrastructure.outputs.instance_ip }}
+      - name: Deploy via AWS SSM (SSH-less)
         run: |
           case "${GITHUB_REF_NAME}" in
             DEV) TAG=dev-latest ;;
@@ -258,35 +221,55 @@ jobs:
             BE_SECRET="${{ secrets.BE_DEFAULT_ENV }}"
           fi
 
-          cat <<EOT > deploy-compose.yml
+          # Get Instance ID
+          INSTANCE_ID=$(aws ec2 describe-instances --filters "Name=ip-address,Values=${{ needs.infrastructure.outputs.instance_ip }}" --query "Reservations[*].Instances[*].InstanceId" --output text)
+          
+          echo "Deploying to Instance: $INSTANCE_ID"
+
+          # Wait for SSM Agent to be ready (it can take 2-3 minutes on boot)
+          echo "Waiting for SSM Agent to reach 'Online' status..."
+          for i in {1..30}; do
+            STATUS=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" --query "InstanceInformationList[0].PingStatus" --output text)
+            if [ "$STATUS" == "Online" ]; then
+              echo "SSM Agent is Online!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 10
+          done
+
+          # Use SSM to write files and deploy
+          # We use a single large block to avoid SSM command sequence issues
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[
+              'mkdir -p /home/ubuntu',
+              'printf \"%s\" \"$BE_SECRET\" > /home/ubuntu/.env',
+              'cat <<EOF > /home/ubuntu/docker-compose.yml
           services:
             backend:
               image: ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:$TAG
               container_name: nexgensis-backend
-              ports: ["8000:8000"]
-              env_file: [".env"]
+              ports: [\"8000:8000\"]
+              env_file: [\".env\"]
               restart: unless-stopped
             frontend:
               image: ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:$TAG
               container_name: nexgensis-frontend
-              ports: ["80:5173"]
-              environment: ["VITE_API_URL=http://localhost:8000/api"]
-              depends_on: ["backend"]
+              ports: [\"80:5173\"]
+              environment: [\"VITE_API_URL=http://localhost:8000/api\"]
+              depends_on: [\"backend\"]
               restart: unless-stopped
-          EOT
-
-          scp -i ~/.ssh/id_rsa deploy-compose.yml ubuntu@$EC2_IP:/home/ubuntu/docker-compose.yml
-          ssh -i ~/.ssh/id_rsa ubuntu@$EC2_IP "printf '%s' '$BE_SECRET' > /home/ubuntu/.env"
-
-          ssh -i ~/.ssh/id_rsa ubuntu@$EC2_IP "
-            set -e
-            echo '--- Health Guard: Verifying Host Tools ---'
-            if ! command -v aws &> /dev/null; then sudo apt-get update && sudo apt-get install -y awscli; fi
-            if ! command -v docker &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker.io; sudo systemctl start docker; sudo systemctl enable docker; fi
-            if ! docker compose version &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker-compose-v2; fi
-
-            echo '--- Deployment: Zero-Downtime Update ---'
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
-            sudo docker compose -f /home/ubuntu/docker-compose.yml pull
-            sudo docker compose -f /home/ubuntu/docker-compose.yml up -d --remove-orphans
-          "
+          EOF',
+              'set -e',
+              'echo \"--- Health Guard: Verifying Host Tools ---\"',
+              'if ! command -v aws &> /dev/null; then sudo apt-get update && sudo apt-get install -y awscli; fi',
+              'if ! command -v docker &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker.io; sudo systemctl start docker; sudo systemctl enable docker; fi',
+              'if ! docker compose version &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker-compose-v2; fi',
+              'echo \"--- Deployment: Zero-Downtime Update ---\"',
+              'aws ecr get-login-password --region ${{ env.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}',
+              'sudo docker compose -f /home/ubuntu/docker-compose.yml pull',
+              'sudo docker compose -f /home/ubuntu/docker-compose.yml up -d --remove-orphans'
+            ]" \
+            --wait
