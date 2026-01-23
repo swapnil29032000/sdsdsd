@@ -1,0 +1,256 @@
+name: Production Unified Pipeline (CI/CD)
+
+on:
+  push:
+    branches: [ main, DEV, QA, PREPROD ]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+  BACKEND_REPO: nexgensis/nexgensis-backend
+  FRONTEND_REPO: nexgensis/nexgensis-frontend
+
+jobs:
+  # 0. Path Filter: Detect where changes occurred
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
+  # 1. Build & Push Stages
+  build-backend:
+    needs: [changes]
+    if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set Image Tag
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            DEV) TAG=dev-latest ;;
+            QA) TAG=qa-latest ;;
+            PREPROD) TAG=preprod-latest ;;
+            main) TAG=prod-latest ;;
+          esac
+          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Inject Build-Time Secrets (with Fallback)
+        run: |
+          # Selection logic: Branch-specific -> Default -> Empty
+          if [ "${GITHUB_REF_NAME}" == "main" ]; then SELECTED_SECRET="${{ secrets.BE_PROD_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "DEV" ]; then SELECTED_SECRET="${{ secrets.BE_DEV_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "QA" ]; then SELECTED_SECRET="${{ secrets.BE_QA_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "PREPROD" ]; then SELECTED_SECRET="${{ secrets.BE_PREPROD_ENV }}"; fi
+          
+          # Fallback to BE_DEFAULT_ENV if specific one is empty
+          if [ -z "$SELECTED_SECRET" ] || [ "$SELECTED_SECRET" == "null" ]; then
+            SELECTED_SECRET="${{ secrets.BE_DEFAULT_ENV }}"
+          fi
+          
+          printf "%s" "$SELECTED_SECRET" > ./backend/.env
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login & Prepare ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ECR_REGISTRY }}
+      
+      - name: Sync Repository
+        run: aws ecr describe-repositories --repository-names ${{ env.BACKEND_REPO }} || aws ecr create-repository --repository-name ${{ env.BACKEND_REPO }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:${{ env.IMAGE_TAG }}
+            ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:${{ env.SHORT_SHA }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-frontend:
+    needs: [changes]
+    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set Image Tag
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            DEV) TAG=dev-latest ;;
+            QA) TAG=qa-latest ;;
+            PREPROD) TAG=preprod-latest ;;
+            main) TAG=prod-latest ;;
+          esac
+          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Inject Build-Time Secrets (with Fallback)
+        run: |
+          if [ "${GITHUB_REF_NAME}" == "main" ]; then SELECTED_SECRET="${{ secrets.FE_PROD_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "DEV" ]; then SELECTED_SECRET="${{ secrets.FE_DEV_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "QA" ]; then SELECTED_SECRET="${{ secrets.FE_QA_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "PREPROD" ]; then SELECTED_SECRET="${{ secrets.FE_PREPROD_ENV }}"; fi
+          
+          if [ -z "$SELECTED_SECRET" ] || [ "$SELECTED_SECRET" == "null" ]; then
+            SELECTED_SECRET="${{ secrets.FE_DEFAULT_ENV }}"
+          fi
+          
+          printf "%s" "$SELECTED_SECRET" > ./frontend/.env
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login & Prepare ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ECR_REGISTRY }}
+      
+      - name: Sync Repository
+        run: aws ecr describe-repositories --repository-names ${{ env.FRONTEND_REPO }} || aws ecr create-repository --repository-name ${{ env.FRONTEND_REPO }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ env.IMAGE_TAG }}
+            ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ env.SHORT_SHA }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 2. Infrastructure Stage
+  infrastructure:
+    needs: [changes]
+    runs-on: ubuntu-latest
+    outputs:
+      instance_ip: ${{ steps.apply.outputs.instance_ip }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Apply
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -var="ecr_registry=${{ env.ECR_REGISTRY }}" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="frontend_repo_name=${{ env.FRONTEND_REPO }}" \
+            -var="backend_repo_name=${{ env.BACKEND_REPO }}"
+          
+          echo "instance_ip=$(terraform output -raw instance_public_ip)" >> $GITHUB_OUTPUT
+        id: apply
+        working-directory: ./terraform
+
+  # 3. Deployment Stage
+  deploy:
+    needs: [infrastructure, build-backend, build-frontend]
+    if: always() && needs.infrastructure.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare SSH Identity & Wait
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          echo "Waiting for SSH on ${{ needs.infrastructure.outputs.instance_ip }}..."
+          for i in {1..30}; do
+            ssh-keyscan -H ${{ needs.infrastructure.outputs.instance_ip }} >> ~/.ssh/known_hosts && \
+            ssh -o ConnectTimeout=5 -i ~/.ssh/id_rsa ubuntu@${{ needs.infrastructure.outputs.instance_ip }} "echo Ready" && break
+            sleep 10
+          done
+
+      - name: Resilient Deploy
+        env:
+          EC2_IP: ${{ needs.infrastructure.outputs.instance_ip }}
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            DEV) TAG=dev-latest ;;
+            QA) TAG=qa-latest ;;
+            PREPROD) TAG=preprod-latest ;;
+            main) TAG=prod-latest ;;
+          esac
+          
+          # Environment selection logic in deployment
+          if [ "${GITHUB_REF_NAME}" == "main" ]; then BE_SECRET="${{ secrets.BE_PROD_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "DEV" ]; then BE_SECRET="${{ secrets.BE_DEV_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "QA" ]; then BE_SECRET="${{ secrets.BE_QA_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "PREPROD" ]; then BE_SECRET="${{ secrets.BE_PREPROD_ENV }}"; fi
+          
+          if [ -z "$BE_SECRET" ] || [ "$BE_SECRET" == "null" ]; then
+            BE_SECRET="${{ secrets.BE_DEFAULT_ENV }}"
+          fi
+
+          cat <<EOT > deploy-compose.yml
+          services:
+            backend:
+              image: ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:$TAG
+              container_name: nexgensis-backend
+              ports: ["8000:8000"]
+              env_file: [".env"]
+              restart: unless-stopped
+            frontend:
+              image: ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:$TAG
+              container_name: nexgensis-frontend
+              ports: ["80:5173"]
+              environment: ["VITE_API_URL=http://localhost:8000/api"]
+              depends_on: ["backend"]
+              restart: unless-stopped
+          EOT
+
+          scp -i ~/.ssh/id_rsa deploy-compose.yml ubuntu@$EC2_IP:/home/ubuntu/docker-compose.yml
+          ssh -i ~/.ssh/id_rsa ubuntu@$EC2_IP "printf '%s' '$BE_SECRET' > /home/ubuntu/.env"
+
+          ssh -i ~/.ssh/id_rsa ubuntu@$EC2_IP "
+            set -e
+            echo '--- Health Guard: Verifying Host Tools ---'
+            if ! command -v aws &> /dev/null; then sudo apt-get update && sudo apt-get install -y awscli; fi
+            if ! command -v docker &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker.io; sudo systemctl start docker; sudo systemctl enable docker; fi
+            if ! docker compose version &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker-compose-v2; fi
+
+            echo '--- Deployment: Zero-Downtime Update ---'
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+            sudo docker compose -f /home/ubuntu/docker-compose.yml pull
+            sudo docker compose -f /home/ubuntu/docker-compose.yml up -d --remove-orphans
+          "

@@ -38,3 +38,11 @@ Implemented `chown -R nodejs:nodejs /app` immediately after copying artifacts to
 Missing `requirements.txt` lead to non-reproducible builds.
 ### **The Solution**
 Generated a pinned `requirements.txt` by analyzing the project imports and settings.
+
+---
+
+## 5. Infrastructure as Code (IaC) Complexity
+### **The Problem**
+Moving from local Docker to a Cloud VM requires manual setup of Docker, security groups, and ECR access, which is prone to human error.
+### **The Solution**
+We implemented **Infrastructure as Code (IaC)** using Terraform. This ensures that every time we deploy to AWS, the security groups (80, 443, 22) and IAM roles are identical. We also used a `user_data` script to automate the entire server configuration, so the application starts running the moment the EC2 instance is live.

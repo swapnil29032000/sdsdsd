@@ -1,109 +1,65 @@
-# 🚀 CI/CD Pipeline with GitHub Actions
+# 🎡 Unified CI/CD & GitOps Guide
 
-This document provides foolproof instructions on how the CI/CD pipeline is structured, how to trigger it, and what secrets are required for successful deployment to AWS ECR.
-
----
-
-## 🏗 Pipeline Overview
-
-The pipeline consists of two separate workflows:
-1.  **Frontend Image Push**: Triggered by changes in the `frontend/` directory.
-2.  **Backend Image Push**: Triggered by changes in the `backend/` directory.
-
-### Branch Mapping & Tagging Strategy
-
-We use a dynamic tagging strategy based on the branch being pushed:
-
-| Branch | Environment | Image Tag |
-| :--- | :--- | :--- |
-| `main` | Production | `prod-latest` + `SHORT_SHA` |
-| `PREPROD` | Pre-Production | `preprod-latest` + `SHORT_SHA` |
-| `QA` | Quality Assurance | `qa-latest` + `SHORT_SHA` |
-| `DEV` | Development | `dev-latest` + `SHORT_SHA` |
+This document deep-dives into the **Production Pipeline (`cicd.yaml`)** and the architectural decisions that ensure speed, security, and 100% uptime.
 
 ---
 
-## 🛠 Prerequisites & Setup
+## 🏗 Pipeline Architecture: The "Build-First" Strategy
 
-To ensure a teammate can follow this without asking questions, follow these steps exactly:
-
-### 1. AWS Infrastructure Requirements
-
-#### 🛡️ AWS OIDC Setup (Identity Provider)
-Following the [official AWS instructions](https://aws.amazon.com/blogs/security/use-iam-roles-to-connect-github-actions-to-actions-in-aws/), you must configure GitHub as a trusted Identity Provider (IdP) in your AWS account to avoid using long-lived access keys.
-
-**Step-by-Step Console Guide:**
-1.  **Create Identity Provider**:
-    - Go to **IAM > Identity providers > Add provider**.
-    - **Provider type**: `OpenID Connect`.
-    - **Provider URL**: `https://token.actions.githubusercontent.com` (Click "Get thumbprint").
-    - **Audience**: `sts.amazonaws.com`.
-2.  **Create IAM Role for GitHub Actions**:
-    - Create a new role named `github-cicd`.
-    - **Trusted entity**: `Web identity`.
-    - **Identity provider**: Select the one created above.
-    - **Audience**: `sts.amazonaws.com`.
-3.  **Configure Trust Relationship**:
-    Update the "Trust relationships" tab with the following policy (replacing `<ORG/REPO>` with your repository path):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:Rohit27305/Nexgensis-devops-assessment:ref:refs/heads/*"
-        },
-        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-      }
-    }
-  ]
-}
+### 1. Build & Push (Intelligent & Parallel)
+- **Why Path Filtering?**: We use `dorny/paths-filter` to skip building the frontend if only the backend was changed. 
+- **Robust Secret Fallback**: The pipeline is designed to search for branch-specific secrets (e.g., `BE_DEV_ENV`) and automatically fall back to `BE_DEFAULT_ENV` if they are missing or empty. This prevents pipeline failures during environment setup.
+```bash
+# Logical selection flow
+If BRANCH_SECRET exists -> Use it
+Else -> Use BE_DEFAULT_ENV
 ```
 
-- **IAM Role Permissions**: Attach a policy to this role that allows `ecr:*` actions for the `nexgensis` repository.
+### 2. Infrastructure (Modular Terraform)
+- **Why OIDC?**: We use **OpenID Connect** for passwordless authentication between GitHub and AWS.
+```yaml
+# OIDC Permission
+permissions:
+  id-token: write
+  contents: read
+```
 
-#### 📦 ECR Repositories
-The pipeline is designed to **automatically create** the required ECR repositories (e.g., `nexgensis/nexgensis-frontend`) if they do not exist. You do not need to create them manually.
+### 3. SSH Deployment (Resilient & Zero-Downtime)
+- **The SSH Waiter**: We use a retry loop to wait for the instance OS to be ready.
+```bash
+for i in {1..30}; do
+  ssh-keyscan -H $IP >> ~/.ssh/known_hosts && \
+  ssh -i key.pem ubuntu@$IP "echo Ready" && break
+  sleep 10
+done
+```
+- **The "Dependency Guard"**: Automatically installs required tools if they are missing on the target host.
+```bash
+if ! command -v docker &> /dev/null; then
+  sudo apt-get update && sudo apt-get install -y docker.io
+fi
+```
+- **Zero-Downtime Strategy**: Rolling updates using `pull` and `up -d`.
+```bash
+sudo docker compose pull
+sudo docker compose up -d --remove-orphans
+```
 
-### 2. GitHub Secrets Configuration
-Navigate to **Settings > Secrets and variables > Actions** in your repository and add the following secrets:
+---
 
-| Secret Name | Description | Example |
-| :--- | :--- | :--- |
-| `AWS_ACCOUNT_ID` | Your 12-digit AWS Account ID | `123456789012` |
-| `ECR_REGISTRY` | The URI of your ECR registry | `123456789012.dkr.ecr.us-east-1.amazonaws.com` |
-| `FE_PROD_ENV` | Frontend production `.env` contents | `VITE_API_URL=...` |
-| `FE_DEFAULT_ENV` | Fallback `.env` for Frontend | `VITE_API_URL=...` |
+## 🛠 Required GitHub Secrets
 
-> [!IMPORTANT]
-> **Backend Secrets**: Backend images do **not** have secrets baked into them during the build process. You must configure environment variables (or the `.env` file) directly in your deployment platform (e.g., AWS ECS Task Definition, K8s Secrets, or local Docker Compose).
+| Secret Name | Purpose |
+| :--- | :--- |
+| `AWS_ACCOUNT_ID` | Used for OIDC authentication. |
+| `SSH_PRIVATE_KEY` | The `.pem` content for secure server access. |
+| `BE_PROD_ENV` | Runtime secrets for the Django backend. |
 
 ---
 
-## 🚦 How to Trigger the Pipeline
+## 🚦 Handling Environments
 
-1.  **Develop**: Make your changes in a feature branch.
-2.  **Commit & Push**: Push your changes to one of the tracked branches (`DEV`, `QA`, `PREPROD`, or `main`).
-3.  **Monitor**: Go to the **Actions** tab in GitHub to watch the build and push progress.
-
-### Path Filters
-To optimize execution time, the workflows only trigger if changes are detected in their respective folders:
-- Frontend changes only trigger `frontend-img-push`.
-- Backend changes only trigger `backend-img-push`.
-
----
-
-## 🛡 Security Practices
-
-- **OIDC (OpenID Connect)**: We do **not** store long-lived AWS Access Keys in GitHub. We use temporary credentials via OIDC for enhanced security.
-- **Least Privilege**: The IAM role should only have `ecr:GetAuthorizationToken` and push permissions for the specific repositories.
-
----
-*Maintained by Antigravity AI for Nexgensis.*
+We use branch-based environment tags:
+- **`main`** ⮕ `prod-latest`
+- **`QA`** ⮕ `qa-latest`
+- **`DEV`** ⮕ `dev-latest`
