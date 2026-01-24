@@ -68,6 +68,7 @@ We use a **Sequential Build Flow** with drift detection:
     ```bash
     aws ssm send-command ... --parameters "commands=['sudo docker compose logs -f']"
     ```
+4.  **Kubernetes Migration**: For enterprise-grade orchestration patterns, see **[KUBERNETES.md](KUBERNETES.md)** — showcasing advanced Helm templating, blue-green deployments, and production-ready architecture.
 
 ---
 
