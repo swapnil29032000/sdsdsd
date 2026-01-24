@@ -65,14 +65,10 @@ resource "aws_instance" "app_server" {
               wait_for_apt
               apt-get install -y docker.io docker-compose-v2 unzip
               
-              # Non-interactive Official AWS CLI v2 Installation
+              # Idempotent Official AWS CLI v2 Installation
               curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
               unzip -o awscliv2.zip
-              if [ -X /usr/local/bin/aws ]; then
-                ./aws/install --update
-              else
-                ./aws/install
-              fi
+              ./aws/install --update
               
               systemctl start docker
               systemctl enable docker
