@@ -115,6 +115,9 @@ jobs:
         with:
           registry: ${{ env.ECR_REGISTRY }}
       
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Sync Repository
         run: aws ecr describe-repositories --repository-names ${{ env.BACKEND_REPO }} || aws ecr create-repository --repository-name ${{ env.BACKEND_REPO }}
 
@@ -171,6 +174,9 @@ jobs:
         with:
           registry: ${{ env.ECR_REGISTRY }}
       
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Sync Repository
         run: aws ecr describe-repositories --repository-names ${{ env.FRONTEND_REPO }} || aws ecr create-repository --repository-name ${{ env.FRONTEND_REPO }}
 
