@@ -57,3 +57,21 @@ variable "existing_iam_role_name" {
   type        = string
   default     = "nexgensis-ec2-ecr-role"
 }
+
+variable "security_group_name" {
+  description = "Name of the security group"
+  type        = string
+  default     = "nexgensis-sg"
+}
+
+variable "create_security_group" {
+  description = "Whether to create a new security group or reuse an existing one"
+  type        = bool
+  default     = true
+}
+
+variable "existing_security_group_id" {
+  description = "The ID of an existing security group to use if create_security_group is false"
+  type        = string
+  default     = ""
+}

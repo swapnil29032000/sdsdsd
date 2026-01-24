@@ -23,17 +23,20 @@ module "iam" {
 }
 
 module "ec2" {
-  source             = "./modules/ec2"
-  ami_id             = var.ami_id
-  vpc_id             = module.vpc.vpc_id
-  subnet_id          = module.vpc.public_subnet_id
-  instance_profile   = module.iam.instance_profile_name
-  aws_region         = var.aws_region
-  ecr_registry       = var.ecr_registry
-  frontend_image_tag = var.frontend_image_tag
-  backend_image_tag  = var.backend_image_tag
-  backend_env        = var.backend_env
-  frontend_repo      = var.frontend_repo_name
-  backend_repo       = var.backend_repo_name
-  key_name           = var.key_name
+  source                     = "./modules/ec2"
+  ami_id                     = var.ami_id
+  vpc_id                     = module.vpc.vpc_id
+  subnet_id                  = module.vpc.public_subnet_id
+  instance_profile           = module.iam.instance_profile_name
+  aws_region                 = var.aws_region
+  ecr_registry               = var.ecr_registry
+  frontend_image_tag         = var.frontend_image_tag
+  backend_image_tag          = var.backend_image_tag
+  backend_env                = var.backend_env
+  frontend_repo              = var.frontend_repo_name
+  backend_repo               = var.backend_repo_name
+  key_name                   = var.key_name
+  security_group_name        = var.security_group_name
+  create_security_group      = var.create_security_group
+  existing_security_group_id = var.existing_security_group_id
 }

@@ -1,5 +1,6 @@
 resource "aws_security_group" "nexgensis_sg" {
-  name_prefix = "nexgensis-sg-"
+  count       = var.create_security_group ? 1 : 0
+  name        = var.security_group_name
   description = "Allow HTTP, HTTPS and SSH"
   vpc_id      = var.vpc_id
 
@@ -30,6 +31,10 @@ resource "aws_security_group" "nexgensis_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  tags = {
+    Name = var.security_group_name
+  }
 }
 
 resource "aws_instance" "app_server" {
@@ -37,7 +42,7 @@ resource "aws_instance" "app_server" {
   instance_type = var.instance_type
 
   subnet_id              = var.subnet_id
-  vpc_security_group_ids = [aws_security_group.nexgensis_sg.id]
+  vpc_security_group_ids = [var.create_security_group ? aws_security_group.nexgensis_sg[0].id : var.existing_security_group_id]
   iam_instance_profile   = var.instance_profile
   key_name               = var.key_name
 

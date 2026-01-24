@@ -33,6 +33,8 @@ Implemented `chown -R nodejs:nodejs /app` immediately after copying artifacts to
 
 ---
 
+---
+
 ## 4. Backend Dependency Management
 ### **The Problem**
 Missing `requirements.txt` lead to non-reproducible builds.
@@ -40,6 +42,12 @@ Missing `requirements.txt` lead to non-reproducible builds.
 Generated a pinned `requirements.txt` by analyzing the project imports and settings.
 
 ---
+
+## 5. Infrastructure as Code (IaC) Complexity
+### **The Problem**
+Moving from local Docker to a Cloud VM requires manual setup of Docker, security groups, and ECR access, which is prone to human error.
+### **The Solution**
+We implemented **Infrastructure as Code (IaC)** using Terraform. This ensures that every time we deploy to AWS, the security groups and IAM roles are identical. We also used a user_data script to automate server configuration.
 
 ---
 
@@ -59,16 +67,24 @@ We pivoted to **AWS Systems Manager (SSM)**. By using AWS-native session managem
 
 ---
 
-## 8. Terraform "Already Exists" (Idempotency)
+## 8. Terraform "Already Exists" & State Persistence
 ### **The Problem**
-Redeployments would fail if IAM roles or Security Groups already existed in the account.
+Redeployments would fail if the local state was lost, leading to "EntityAlreadyExists" errors even with `name_prefix`. S3/DynamoDB backends add cost and complexity.
 ### **The Solution**
-Implemented **Smart Resource Reuse**. By using `name_prefix` and conditional `data/resource` toggles, Terraform now intelligently detects existing infrastructure and reuses it instead of erroring out.
+Implemented **Git-Based State Management**. We now version the `terraform.tfstate` file directly in the repository. The CI/CD pipeline automatically commits and pushes the updated state back to the repository after every change. This ensures 100% idempotency without external cloud costs.
 
 ---
 
-## 9. EC2 Boot Timing Gaps
+## 9. SSM CLI Versioning & The Deployment Bug
 ### **The Problem**
-Deployments failed because they started after the instance was "Running" but before the OS or SSM agent was fully initialized.
+The `aws ssm send-command` failed with `Unknown options: --wait` because the GitHub runner's CLI version didn't support that specific flag.
 ### **The Solution**
-Implemented a robust **SSM Readiness Waiter** in the CI/CD pipeline that polls the agent status for up to 5 minutes, ensuring the environment is truly ready for deployment.
+We replaced the brittle `--wait` flag with a **Custom Native Waiter**. The pipeline now polls `aws ssm list-command-invocations` every 15 seconds, providing real-time logs and gracefully handling success/failure states.
+
+---
+
+## 10. Security Group Naming & Visibility
+### **The Problem**
+Infrastructure components were using `name_prefix`, resulting in generic names in the AWS console that lacked project-specific context and visibility.
+### **The Solution**
+Refactored the EC2 module to support **Explicit Naming**. We added a `security_group_name` variable and a descriptive `Name` tag, allowing users to define exactly how their security groups appear in the AWS console while still maintaining the "Smart Reuse" logic for idempotency.

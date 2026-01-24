@@ -30,8 +30,8 @@ yarn-error.log*
 
 # --- Infrastructure / Terraform ---
 .terraform/
-*.tfstate
-*.tfstate.*
+# *.tfstate
+# *.tfstate.*
 crash.log
 crash.*.log
 *.tfvars

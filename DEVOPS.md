@@ -47,8 +47,6 @@ The following Ports are open on the infrastructure level:
 
 ---
 
----
-
 ## 🚀 3. Unified GitOps Pipeline (cicd.yaml)
 
 The project uses a single **Production Pipeline** to orchestrate the "Build-First" strategy.
