@@ -314,8 +314,13 @@ jobs:
               'if ! command -v unzip &> /dev/null; then sudo apt-get update && sudo apt-get install -y unzip; fi',
               'if ! command -v aws &> /dev/null; then 
                 curl \"https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip\" -o \"awscliv2.zip\"
-                unzip awscliv2.zip
+                unzip -o awscliv2.zip
                 sudo ./aws/install
+              else
+                echo \"AWS CLI already installed, ensuring modern version...\"
+                curl \"https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip\" -o \"awscliv2.zip\"
+                unzip -o awscliv2.zip
+                sudo ./aws/install --update
               fi',
               'wait_for_apt',
               'if ! command -v docker &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker.io; sudo systemctl start docker; sudo systemctl enable docker; fi',
