@@ -4,6 +4,17 @@ on:
   push:
     branches: [ main, DEV, QA, PREPROD ]
   workflow_dispatch:
+    inputs:
+      force_backend:
+        description: 'Force rebuild backend (e.g., after secret changes)'
+        required: false
+        type: boolean
+        default: false
+      force_frontend:
+        description: 'Force rebuild frontend (e.g., after secret changes)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -75,7 +86,11 @@ jobs:
   # 1. Build & Push Stages
   build-backend:
     needs: [changes]
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.bootstrap == 'true' || github.event_name == 'workflow_dispatch'
+    if: |
+      (needs.changes.outputs.backend == 'true' || 
+       needs.changes.outputs.bootstrap == 'true' || 
+       github.event_name == 'workflow_dispatch' && inputs.force_backend ||
+       github.event.inputs.force_backend == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,7 +149,12 @@ jobs:
 
   build-frontend:
     needs: [changes, infrastructure]
-    if: (needs.changes.outputs.frontend == 'true' || needs.infrastructure.outputs.ip_changed == 'true' || needs.changes.outputs.bootstrap == 'true' || github.event_name == 'workflow_dispatch')
+    if: |
+      (needs.changes.outputs.frontend == 'true' || 
+       needs.infrastructure.outputs.ip_changed == 'true' || 
+       needs.changes.outputs.bootstrap == 'true' || 
+       github.event_name == 'workflow_dispatch' && inputs.force_frontend ||
+       github.event.inputs.force_frontend == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
