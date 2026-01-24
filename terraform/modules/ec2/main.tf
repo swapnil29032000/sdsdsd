@@ -50,12 +50,21 @@ resource "aws_instance" "app_server" {
               #!/bin/bash
               set -e
 
-              # Function to wait for apt locks
+              # Function to wait for apt locks (with Nuke logic)
               wait_for_apt() {
-                echo "Checking for apt locks..."
-                while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-                  echo "Waiting for other apt processes to finish..."
+                echo "Checking for system locks..."
+                local timeout=60
+                while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+                  if [ "$timeout" -le 0 ]; then
+                    echo "Lock persists, implementing aggressive resolution..."
+                    sudo killall -9 apt apt-get 2>/dev/null || true
+                    sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock
+                    sudo dpkg --configure -a
+                    break
+                  fi
+                  echo "Waiting for system to release lock... ($timeout)"
                   sleep 5
+                  ((timeout--))
                 done
               }
 
