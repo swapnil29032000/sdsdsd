@@ -272,7 +272,11 @@ jobs:
               restart: unless-stopped
           EOF',
               'set -e',
+              'wait_for_apt() { while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do echo \"Waiting for apt lock...\"; sleep 5; done; }',
+              'echo \"--- Health Guard: Verifying Host Tools ---\"',
+              'wait_for_apt',
               'if ! command -v aws &> /dev/null; then sudo apt-get update && sudo apt-get install -y awscli; fi',
+              'wait_for_apt',
               'if ! command -v docker &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker.io; sudo systemctl start docker; sudo systemctl enable docker; fi',
               'if ! docker compose version &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker-compose-v2; fi',
               'aws ecr get-login-password --region ${{ env.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}',

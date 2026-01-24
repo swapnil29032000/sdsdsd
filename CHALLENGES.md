@@ -88,3 +88,10 @@ We replaced the brittle `--wait` flag with a **Custom Native Waiter**. The pipel
 Infrastructure components were using `name_prefix`, resulting in generic names in the AWS console that lacked project-specific context and visibility.
 ### **The Solution**
 Refactored the EC2 module to support **Explicit Naming**. We added a `security_group_name` variable and a descriptive `Name` tag, allowing users to define exactly how their security groups appear in the AWS console while still maintaining the "Smart Reuse" logic for idempotency.
+---
+
+## 11. Apt Lock Race Conditions
+### **The Problem**
+On fresh Ubuntu AMIs, background system updates (like `unattended-upgrades`) often start immediately on boot. This locks the `apt` package manager, causing automated Docker installations to fail with `Could not get lock /var/lib/apt/lists/lock`.
+### **The Solution**
+Implemented a robust **Apt Waiter** function in both the Terraform `user_data` and the CI/CD deployment script. This logic polls for existing locks and gracefully waits for them to be released before proceeding with dependency installation, ensuring 100% deployment reliability on any AMI.

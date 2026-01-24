@@ -48,9 +48,23 @@ resource "aws_instance" "app_server" {
 
   user_data = <<-EOF
               #!/bin/bash
-              # Install Docker
+              set -e
+
+              # Function to wait for apt locks
+              wait_for_apt() {
+                echo "Checking for apt locks..."
+                while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+                  echo "Waiting for other apt processes to finish..."
+                  sleep 5
+                done
+              }
+
+              wait_for_apt
               apt-get update
+              
+              wait_for_apt
               apt-get install -y docker.io docker-compose-v2 awscli
+              
               systemctl start docker
               systemctl enable docker
               EOF
