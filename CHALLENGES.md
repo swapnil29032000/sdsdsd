@@ -91,23 +91,34 @@ Refactored the EC2 module to support **Explicit Naming**. We added a `security_g
 
 ---
 
+---
+
+## 11. Apt Lock Race Conditions
+### **The Problem**
+On fresh Ubuntu AMIs, background system updates often lock the `apt` package manager, causing automated Docker installations to fail.
+### **The Solution**
+Implemented a robust **Apt Waiter** function in both Terraform and CI/CD. This logic polls for existing locks and waits for them to be released, ensuring 100% reliability on any AMI.
+
+---
+
 ## 12. The Bootstrap Paradox (Missing Images)
 ### **The Problem**
-If ECR images are deleted (manual cleanup or fresh repository), the deployment job would fail during the initial infrastructure stand-up, as the `changes` job would skip builds if no code changed.
+If ECR images were missing, the build-skip logic would prevent the deployment from ever starting.
 ### **The Solution**
-Implemented **Bootstrap Resilience**. The `changes` job now actively polls ECR for required image tags. If a tag is missing, it signals `bootstrap=true`, which forces the build jobs to run regardless of code diffs. This ensures a self-healing pipeline that always has its dependencies ready.
+Implemented **Bootstrap Resilience**. The pipeline now polls ECR for tags and forces a build if they are missing, regardless of code changes.
 
 ---
 
 ## 13. Ubuntu 24.04 Package Gaps (AWS CLI v2)
 ### **The Problem**
-Ubuntu 24.04 (Noble) has discontinued the legacy `awscli` apt package, causing deployment failures with `No installation candidate`. 
+The legacy `awscli` package is gone in Ubuntu 24.04, breaking the `apt-get install` step.
 ### **The Solution**
-Pivoted to the **Official AWS CLI v2 Binary Installer**. We integrated automated `curl`, `unzip`, and `./install` logic into both the Terraform `user_data` and the CI/CD's SSM command block. This ensures the correct, modern AWS CLI version is always present, regardless of AMI defaults.
+Pivoted to the **Official AWS CLI v2 Binary Installer**. We integrated automated `curl` and `unzip` logic to ensure the modern CLI is always present.
+
 ---
 
-## 11. Apt Lock Race Conditions
+## 14. Buildx Cache Export Drivers
 ### **The Problem**
-On fresh Ubuntu AMIs, background system updates (like `unattended-upgrades`) often start immediately on boot. This locks the `apt` package manager, causing automated Docker installations to fail with `Could not get lock /var/lib/apt/lists/lock`.
+The CI/CD failed with `Cache export is not supported for the docker driver` when attempting to use GitHub Actions caching.
 ### **The Solution**
-Implemented a robust **Apt Waiter** function in both the Terraform `user_data` and the CI/CD deployment script. This logic polls for existing locks and gracefully waits for them to be released before proceeding with dependency installation, ensuring 100% deployment reliability on any AMI.
+Integrated `docker/setup-buildx-action` to create a dedicated builder instance. This enabled full support for `type=gha` cache exports, drastically reducing build times while maintaining pipeline stability.
