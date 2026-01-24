@@ -257,7 +257,7 @@ jobs:
     if: always() && needs.infrastructure.result == 'success'
     runs-on: ubuntu-latest
     env:
-      BE_SECRET: ${{ secrets.BE_PROD_ENV || secrets.BE_DEFAULT_ENV }} # Simplify secret selection
+      BE_SECRET: ${{ secrets.BE_PROD_ENV || secrets.BE_DEFAULT_ENV }}
       TAG: ${{ github.ref_name == 'main' && 'prod-latest' || github.ref_name == 'DEV' && 'dev-latest' || github.ref_name == 'QA' && 'qa-latest' || 'preprod-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -268,83 +268,99 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Orchestrate SSM Deployment
+      - name: Deploy via AWS SSM (SSH-less)
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances --filters "Name=ip-address,Values=${{ needs.infrastructure.outputs.instance_ip }}" --query "Reservations[*].Instances[*].InstanceId" --output text)
-          echo "Target Instance: $INSTANCE_ID"
+          echo "Deploying to Instance: $INSTANCE_ID"
 
           # Wait for SSM Agent
-          for i in {1..15}; do
+          for i in {1..30}; do
             STATUS=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" --query "InstanceInformationList[0].PingStatus" --output text)
-            [ "$STATUS" == "Online" ] && break
+            if [ "$STATUS" == "Online" ]; then
+              echo "SSM Agent is Online!"
+              break
+            fi
             sleep 10
           done
 
-          # Encode configurations for safe transmission
-          ENCODED_SECRET=$(echo "${BE_SECRET}" | base64 -w 0)
+          # Encode nginx.conf for transmission
           ENCODED_NGINX=$(base64 -w 0 < nginx.conf)
-          ENCODED_COMPOSE=$(base64 -w 0 < docker-compose.yml)
-          
-          # Write deployment script to temp file to avoid heredoc issues
-          cat > /tmp/deploy.sh << 'SCRIPT_END'
-          set -e
-          mkdir -p /home/ubuntu
-          
-          # Decode and write backend secret
-          echo "ENCODED_SECRET_PLACEHOLDER" | base64 -d > /home/ubuntu/.env
-          
-          # Fix ALLOWED_HOSTS for Gateway connectivity
-          if ! grep -q "ALLOWED_HOSTS" /home/ubuntu/.env; then
-            echo "ALLOWED_HOSTS=*" >> /home/ubuntu/.env
-          else
-            sed -i "s|ALLOWED_HOSTS=.*|ALLOWED_HOSTS=*|" /home/ubuntu/.env
-          fi
-          
-          # Deploy nginx.conf from repository
-          echo "ENCODED_NGINX_PLACEHOLDER" | base64 -d > /home/ubuntu/nginx.conf
-          
-          # Deploy docker-compose.yml from repository
-          echo "ENCODED_COMPOSE_PLACEHOLDER" | base64 -d > /home/ubuntu/docker-compose.yml
-          
-          # Production Patching: Replace build contexts with ECR images
-          sed -i '/build:/,+2d' /home/ubuntu/docker-compose.yml
-          sed -i 's|container_name: nexgensis-backend|image: ECR_REGISTRY_PLACEHOLDER/BACKEND_REPO_PLACEHOLDER:TAG_PLACEHOLDER\n      container_name: nexgensis-backend|' /home/ubuntu/docker-compose.yml
-          sed -i 's|container_name: nexgensis-frontend|image: ECR_REGISTRY_PLACEHOLDER/FRONTEND_REPO_PLACEHOLDER:TAG_PLACEHOLDER\n      container_name: nexgensis-frontend|' /home/ubuntu/docker-compose.yml
-          
-          # Wait for cloud-init and deploy
-          sudo cloud-init status --wait
-          aws ecr get-login-password --region AWS_REGION_PLACEHOLDER | sudo docker login --username AWS --password-stdin ECR_REGISTRY_PLACEHOLDER
-          sudo docker compose -f /home/ubuntu/docker-compose.yml pull
-          sudo docker compose -f /home/ubuntu/docker-compose.yml up -d --remove-orphans
-          SCRIPT_END
 
-          # Replace placeholders with actual values
-          sed -i "s|ENCODED_SECRET_PLACEHOLDER|${ENCODED_SECRET}|g" /tmp/deploy.sh
-          sed -i "s|ENCODED_NGINX_PLACEHOLDER|${ENCODED_NGINX}|g" /tmp/deploy.sh
-          sed -i "s|ENCODED_COMPOSE_PLACEHOLDER|${ENCODED_COMPOSE}|g" /tmp/deploy.sh
-          sed -i "s|ECR_REGISTRY_PLACEHOLDER|${{ env.ECR_REGISTRY }}|g" /tmp/deploy.sh
-          sed -i "s|BACKEND_REPO_PLACEHOLDER|${{ env.BACKEND_REPO }}|g" /tmp/deploy.sh
-          sed -i "s|FRONTEND_REPO_PLACEHOLDER|${{ env.FRONTEND_REPO }}|g" /tmp/deploy.sh
-          sed -i "s|TAG_PLACEHOLDER|${TAG}|g" /tmp/deploy.sh
-          sed -i "s|AWS_REGION_PLACEHOLDER|${{ env.AWS_REGION }}|g" /tmp/deploy.sh
-
-          # Send command via SSM
+          # Trigger Command
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters "commands=[$(cat /tmp/deploy.sh | jq -Rs .)]" \
-            --query "Command.CommandId" --output text)
+            --parameters "commands=[
+              'mkdir -p /home/ubuntu',
+              'printf \"%s\" \"${BE_SECRET}\" > /home/ubuntu/.env',
+              'echo \"${ENCODED_NGINX}\" | base64 -d > /home/ubuntu/nginx.conf',
+              'cat <<EOF > /home/ubuntu/docker-compose.yml
+          services:
+            nginx:
+              image: nginx:stable-alpine
+              container_name: nexgensis-gateway
+              ports: [\"80:80\"]
+              volumes: [\"./nginx.conf:/etc/nginx/nginx.conf:ro\"]
+              depends_on: [\"frontend\", \"backend\"]
+              restart: unless-stopped
+            backend:
+              image: ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:${TAG}
+              container_name: nexgensis-backend
+              expose: [\"8000\"]
+              env_file: [\".env\"]
+              restart: unless-stopped
+            frontend:
+              image: ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:${TAG}
+              container_name: nexgensis-frontend
+              expose: [\"5173\"]
+              restart: unless-stopped
+          EOF',
+              'set -e',
+              'echo \"--- Provisioning Guard: Waiting for Cloud-Init ---\"',
+              'sudo cloud-init status --wait',
+              'echo \"--- Health Guard: Verifying Host Tools ---\"',
+              'wait_for_apt() { 
+                echo \"Checking for system locks...\"; 
+                local timeout=60;
+                while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do 
+                  if [ \"$timeout\" -le 0 ]; then
+                    echo \"Lock persists, implementing aggressive resolution...\";
+                    sudo killall -9 apt apt-get 2>/dev/null || true;
+                    sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock;
+                    sudo dpkg --configure -a;
+                    break;
+                  fi
+                  echo \"Waiting for system to release lock... ($timeout)\"; 
+                  sleep 5; 
+                  ((timeout--));
+                done; 
+              }',
+              'wait_for_apt',
+              'if ! command -v unzip &> /dev/null; then sudo apt-get update && sudo apt-get install -y unzip; fi',
+              'curl \"https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip\" -o \"awscliv2.zip\"',
+              'unzip -o awscliv2.zip',
+              'sudo ./aws/install --update',
+              'wait_for_apt',
+              'if ! command -v docker &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker.io; sudo systemctl start docker; sudo systemctl enable docker; fi',
+              'if ! docker compose version &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker-compose-v2; fi',
+              'aws ecr get-login-password --region ${{ env.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}',
+              'sudo docker compose -f /home/ubuntu/docker-compose.yml pull',
+              'sudo docker compose -f /home/ubuntu/docker-compose.yml up -d --remove-orphans'
+            ]" --query "Command.CommandId" --output text)
 
-          # Poll for completion
-          echo "SSM Job Started: $COMMAND_ID"
+          # Custom Waiter/Polling for Success
+          echo "Waiting for command $COMMAND_ID to finish..."
           while true; do
             STATUS=$(aws ssm list-command-invocations --command-id "$COMMAND_ID" --details --query "CommandInvocations[0].Status" --output text)
-            [ "$STATUS" == "Success" ] && break
-            if [[ "$STATUS" =~ (Failed|TimedOut|Cancelled) ]]; then
-              echo "Error: Deployment $STATUS"
+            if [ "$STATUS" == "Success" ]; then
+              echo "Deployment Successful!"
+              break
+            elif [ "$STATUS" == "Failed" ] || [ "$STATUS" == "TimedOut" ] || [ "$STATUS" == "Cancelled" ]; then
+              echo "Deployment $STATUS!"
               aws ssm list-command-invocations --command-id "$COMMAND_ID" --details --query "CommandInvocations[0].CommandPlugins[0].Output" --output text
               exit 1
             fi
+            echo "Current Status: $STATUS. Waiting..."
             sleep 15
           done
 
@@ -352,9 +368,9 @@ jobs:
         if: success()
         run: |
           IP="${{ needs.infrastructure.outputs.instance_ip }}"
-          echo "=========================================================="
+          echo "==========================================================="
           echo "✨ INFRASTRUCTURE & GATEWAY READY ✨"
-          echo "=========================================================="
+          echo "==========================================================="
           echo "🌍 Portal:  http://$IP"
           echo "⚙️  API:     http://$IP/api/hello/"
-          echo "=========================================================="
+          echo "==========================================================="
