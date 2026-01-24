@@ -369,18 +369,7 @@ jobs:
               'if ! docker compose version &> /dev/null; then sudo apt-get update && sudo apt-get install -y docker-compose-v2; fi',
               'aws ecr get-login-password --region ${{ env.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}',
               'sudo docker compose -f /home/ubuntu/docker-compose.yml pull',
-              'sudo docker compose -f /home/ubuntu/docker-compose.yml up -d --remove-orphans',
-              'echo \"--- SSL Certificate Setup (if domain is configured) ---\"',
-              'DOMAIN=\"${{ secrets.APP_DOMAIN }}\"',
-              'if [ -n \"$DOMAIN\" ] && [ \"$DOMAIN\" != \"\" ]; then',
-              '  echo \"Setting up SSL for domain: $DOMAIN\"',
-              '  wait_for_apt',
-              '  sudo apt-get update && sudo apt-get install -y certbot python3-certbot-nginx',
-              '  sudo certbot --nginx -d \"$DOMAIN\" --non-interactive --agree-tos --email admin@\"$DOMAIN\" --redirect || echo \"Certbot failed, continuing without SSL\"',
-              '  sudo docker restart nexgensis-gateway || true',
-              'else',
-              '  echo \"No domain configured, skipping SSL setup\"',
-              'fi'
+              'sudo docker compose -f /home/ubuntu/docker-compose.yml up -d --remove-orphans'
             ]" --query "Command.CommandId" --output text)
 
           # Custom Waiter/Polling for Success
