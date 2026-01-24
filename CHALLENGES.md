@@ -71,7 +71,42 @@ We pivoted to **AWS Systems Manager (SSM)**. By using AWS-native session managem
 ### **The Problem**
 Redeployments would fail if the local state was lost, leading to "EntityAlreadyExists" errors even with `name_prefix`. S3/DynamoDB backends add cost and complexity.
 ### **The Solution**
-Implemented **Git-Based State Management**. We now version the `terraform.tfstate` file directly in the repository. The CI/CD pipeline automatically commits and pushes the updated state back to the repository after every change. This ensures 100% idempotency without external cloud costs.
+Implemented a dual-layer **Provisioning Guard**. 
+1. **Synchronization**: Added `sudo cloud-init status --wait` to the deployment block, forcing the pipeline to respect the server's own setup progress.
+2. **Aggressive Resilience**: Refined the lock-waiter with a **Nuke & Wait** strategy. If a system lock persists for more than 5 minutes, the script proactively clears the offending process and lock files. This ensures 100% autonomy and removes all potential for "stuck" deployment states.
+
+---
+
+## 25. Breaking the Chicken-and-Egg Build-Time IP Dependency
+### **The Problem**
+Modern frontend frameworks like Vite bake environment variables into static assets during the build phase. This created a circular dependency: we needed the server's Public IP to build the UI, but the UI was built *before* Terraform provisioned the server. Using runtime injection was ineffective against pre-compiled Javascript.
+### **The Solution**
+Orchestrated a **Sequential Build-Infra Pipeline**. 
+1. **Infrastructure First**: Re-ordered the CI/CD so Terraform provisions the EC2 instance before the frontend build starts.
+2. **Dynamic Cross-Job Injection**: Configured the frontend build job to depend on the infrastructure job, fetching the real Public IP directly from Terraform's outputs.
+3. **Build-Time Baking**: The pipeline now injects the real server IP into the `.env` file just milliseconds before the Docker image is created. This ensures the React app is born with the correct backend URL, guaranteeing total browser connectivity without needing a reverse proxy.
+
+---
+
+## 26. Smart Idempotency: IP Drift Detection
+### **The Problem**
+Re-ordering the pipeline into a sequential 'Infra -> Build' flow is stable, but it can be slow if a full frontend rebuild is triggered every time, even when the server IP hasn't changed. This wastes build minutes and delays developer feedback.
+### **The Solution**
+Implemented **IP-Aware Conditional Builds**.
+1. **Drift Detection**: The infrastructure job now captures the 'Old IP' from the project's state before running Terraform and compares it with the 'New IP' after.
+2. **Idempotency Signal**: It outputs an `ip_changed` flag based on this comparison.
+3. **Intelligent Skip**: The `build-frontend` job now uses a complex `if` condition: it rebuilds ONLY if code changes are detected OR if the IP has drifted. If both are persistent, the pipeline skips the build entirely. This provides the ultimate balance of 100% connectivity and lightning-fast developer cycles.
+
+---
+
+## 24. Direct IP Connectivity vs Prototyping Gaps
+### **The Problem**
+Client-side React applications executed in a user's browser cannot resolve internal Docker hostnames like `backend`. Without an Nginx reverse proxy to bridge this gap via relative paths (`/api`), the app fails to connect unless a Public IP is explicitly provided.
+### **The Solution**
+Simplified the architecture to use **Direct Port Exposure** as requested, while maintaining production reachability.
+1. **Direct Ports**: Mapped Frontend to 80 and Backend to 8000 directly on the host. 
+2. **Runtime Injection**: Re-implemented the CI/CD logic to fetch the server's Public IP and inject it into the frontend's `VITE_API_URL` during deployment. This ensures the browser always has the correct target.
+3. **Local Match**: Configured `docker-compose.yml` to use `localhost` for a seamless local-to-cloud development experience, satisfying all architectural constraints.
 
 ---
 
@@ -106,6 +141,17 @@ Implemented a robust **Apt Waiter** function in both Terraform and CI/CD. This l
 If ECR images were missing, the build-skip logic would prevent the deployment from ever starting.
 ### **The Solution**
 Implemented **Bootstrap Resilience**. The pipeline now polls ECR for tags and forces a build if they are missing, regardless of code changes.
+
+---
+
+## 23. The Docker Network Browser-Bridge (Nginx Gateway)
+### **The Problem**
+Connecting a browser-side React application to an internal Django backend over a private Docker network is architecturally impossible directly, as the client (user's browser) has no access to the containerized network. Simply using `backend` as a hostname fails because it only exists inside the EC2 server.
+### **The Solution**
+Pivoted to a **Production Gateway Pattern** using Nginx as a sidecar.
+1. **Internal Routing**: We added an Nginx service at Port 80 that proxies `/api` to the backend container over the private Docker fabric.
+2. **Relative Linking**: Built the frontend with `VITE_API_URL=/api`, telling the browser to route API calls back to the Gateway.
+3. **No Dockerfile Changes**: Achieved this purely via Docker Compose and CI/CD build-time injection, fulfilling all local and production operational requirements.
 
 ---
 

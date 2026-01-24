@@ -133,8 +133,12 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-frontend:
-    needs: [changes]
-    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.bootstrap == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [changes, infrastructure]
+    if: |
+      (needs.changes.outputs.frontend == 'true' || 
+       needs.infrastructure.outputs.ip_changed == 'true' || 
+       needs.changes.outputs.bootstrap == 'true' || 
+       github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -150,7 +154,7 @@ jobs:
           echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-      - name: Inject Build-Time Secrets (with Fallback)
+      - name: Inject Build-Time IP & Secrets
         run: |
           if [ "${GITHUB_REF_NAME}" == "main" ]; then SELECTED_SECRET="${{ secrets.FE_PROD_ENV }}"; fi
           if [ "${GITHUB_REF_NAME}" == "DEV" ]; then SELECTED_SECRET="${{ secrets.FE_DEV_ENV }}"; fi
@@ -161,7 +165,11 @@ jobs:
             SELECTED_SECRET="${{ secrets.FE_DEFAULT_ENV }}"
           fi
           
-          printf "%s" "$SELECTED_SECRET" > ./frontend/.env
+          # Force synchronization: Use Public IP from Infrastructure job
+          IP="${{ needs.infrastructure.outputs.instance_ip }}"
+          echo "Baking VITE_API_URL with IP: $IP"
+          echo "VITE_API_URL=http://$IP:8000/api" > ./frontend/.env
+          printf "%s\n" "$SELECTED_SECRET" >> ./frontend/.env
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -196,10 +204,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       instance_ip: ${{ steps.apply.outputs.instance_ip }}
+      ip_changed: ${{ steps.apply.outputs.ip_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }} # Ensure we have write access if needed
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -215,12 +224,13 @@ jobs:
         id: apply
         working-directory: ./terraform
         run: |
-          # Configure Git
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Pull latest to avoid conflicts
           git pull origin ${{ github.ref_name }}
+          
+          # Capture OLD IP for drift detection
+          OLD_IP=$(grep -oP '"public_ip":\s*"\K[^"]+' terraform.tfstate || echo "none")
+          echo "Last Known IP: $OLD_IP"
           
           terraform init
           terraform apply -auto-approve \
@@ -229,16 +239,22 @@ jobs:
             -var="frontend_repo_name=${{ env.FRONTEND_REPO }}" \
             -var="backend_repo_name=${{ env.BACKEND_REPO }}"
           
-          echo "instance_ip=$(terraform output -raw instance_public_ip)" >> $GITHUB_OUTPUT
+          NEW_IP=$(terraform output -raw instance_public_ip)
+          echo "instance_ip=$NEW_IP" >> $GITHUB_OUTPUT
           
-          # Commit state file if changed
+          # Signal IP Change
+          if [ "$OLD_IP" != "$NEW_IP" ]; then
+            echo "IP DRIFT DETECTED: $OLD_IP -> $NEW_IP"
+            echo "ip_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "IP PERSISTENT: $NEW_IP"
+            echo "ip_changed=false" >> $GITHUB_OUTPUT
+          fi
+          
           if git status --short | grep -q "terraform.tfstate"; then
-            echo "State changed, committing back to repository..."
             git add terraform.tfstate
             git commit -m "chore: update terraform state [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
-          else
-            echo "No state changes detected."
           fi
 
   # 3. Deployment Stage
@@ -303,7 +319,6 @@ jobs:
               image: ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:$TAG
               container_name: nexgensis-frontend
               ports: [\"80:5173\"]
-              environment: [\"VITE_API_URL=http://localhost:8000/api\"]
               depends_on: [\"backend\"]
               restart: unless-stopped
           EOF',
@@ -355,3 +370,18 @@ jobs:
             echo "Current Status: $STATUS. Waiting..."
             sleep 15
           done
+
+
+      - name: 🚀 Deployment Summary
+        if: success()
+        run: |
+          IP="${{ needs.infrastructure.outputs.instance_ip }}"
+          echo "=========================================================="
+          echo "✨ DEPLOYMENT SUCCESSFUL ✨"
+          echo "=========================================================="
+          echo "🌐 Public IP: $IP"
+          echo "🌍 Frontend:  http://$IP"
+          echo "⚙️ Backend:   http://$IP/api/hello/"
+          echo "=========================================================="
+          echo "Action: Map your domain (A record) to $IP"
+          echo "=========================================================="

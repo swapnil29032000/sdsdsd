@@ -11,6 +11,8 @@ services:
     volumes:
       - backend_data:/app
     restart: unless-stopped
+    networks:
+      - nexgensis-network
 
   frontend:
     build:
@@ -24,6 +26,12 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    networks:
+      - nexgensis-network
 
 volumes:
   backend_data:
+
+networks:
+  nexgensis-network:
+    driver: bridge
