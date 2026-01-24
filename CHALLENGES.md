@@ -88,6 +88,22 @@ We replaced the brittle `--wait` flag with a **Custom Native Waiter**. The pipel
 Infrastructure components were using `name_prefix`, resulting in generic names in the AWS console that lacked project-specific context and visibility.
 ### **The Solution**
 Refactored the EC2 module to support **Explicit Naming**. We added a `security_group_name` variable and a descriptive `Name` tag, allowing users to define exactly how their security groups appear in the AWS console while still maintaining the "Smart Reuse" logic for idempotency.
+
+---
+
+## 12. The Bootstrap Paradox (Missing Images)
+### **The Problem**
+If ECR images are deleted (manual cleanup or fresh repository), the deployment job would fail during the initial infrastructure stand-up, as the `changes` job would skip builds if no code changed.
+### **The Solution**
+Implemented **Bootstrap Resilience**. The `changes` job now actively polls ECR for required image tags. If a tag is missing, it signals `bootstrap=true`, which forces the build jobs to run regardless of code diffs. This ensures a self-healing pipeline that always has its dependencies ready.
+
+---
+
+## 13. Ubuntu 24.04 Package Gaps (AWS CLI v2)
+### **The Problem**
+Ubuntu 24.04 (Noble) has discontinued the legacy `awscli` apt package, causing deployment failures with `No installation candidate`. 
+### **The Solution**
+Pivoted to the **Official AWS CLI v2 Binary Installer**. We integrated automated `curl`, `unzip`, and `./install` logic into both the Terraform `user_data` and the CI/CD's SSM command block. This ensures the correct, modern AWS CLI version is always present, regardless of AMI defaults.
 ---
 
 ## 11. Apt Lock Race Conditions
