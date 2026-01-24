@@ -70,4 +70,6 @@ The production environment is managed with a modern, secure DevOps stack:
 - **Deployment**: SSH-less (via AWS Systems Manager - SSM).
 - **CI/CD**: Unified GitHub Actions pipeline with path-based builds and auto-scaling.
 
-For detailed setup and troubleshooting, see the **[DevOps Guide](file:///home/rohit/Rohit/Nexgensis-devops-assessment/DEVOPS.md)**.
+📖 **For detailed CI/CD architecture and workflow patterns**, see **[DEVOPS.md](DEVOPS.md)**.
+
+For detailed setup and troubleshooting, see the **[DevOps Guide](DEVOPS.md)** and **[Challenges Documentation](CHALLENGES.md)**.
