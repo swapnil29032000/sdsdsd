@@ -276,59 +276,70 @@ jobs:
           # Wait for SSM Agent
           for i in {1..15}; do
             STATUS=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" --query "InstanceInformationList[0].PingStatus" --output text)
-            if [ "$STATUS" == "Online" ]; then break; fi
+            [ "$STATUS" == "Online" ] && break
             sleep 10
           done
 
-          # Build the script as an environment variable to avoid quoting chaos
-          # We use heredoc here but we'll pipe it to jq for JSON stringification
+          # Encode configurations for safe transmission
           ENCODED_SECRET=$(echo "${BE_SECRET}" | base64 -w 0)
           ENCODED_NGINX=$(base64 -w 0 < nginx.conf)
           ENCODED_COMPOSE=$(base64 -w 0 < docker-compose.yml)
           
-          # Use a variable on the runner to hold the full script
-          FULL_SCRIPT=$(cat <<EOF
+          # Write deployment script to temp file to avoid heredoc issues
+          cat > /tmp/deploy.sh << 'SCRIPT_END'
           set -e
           mkdir -p /home/ubuntu
-          echo "${ENCODED_SECRET}" | base64 -d > /home/ubuntu/.env
-
+          
+          # Decode and write backend secret
+          echo "ENCODED_SECRET_PLACEHOLDER" | base64 -d > /home/ubuntu/.env
+          
           # Fix ALLOWED_HOSTS for Gateway connectivity
           if ! grep -q "ALLOWED_HOSTS" /home/ubuntu/.env; then
             echo "ALLOWED_HOSTS=*" >> /home/ubuntu/.env
           else
             sed -i "s|ALLOWED_HOSTS=.*|ALLOWED_HOSTS=*|" /home/ubuntu/.env
           fi
-
-          # Deploy static nginx.conf from repository
-          echo "${ENCODED_NGINX}" | base64 -d > /home/ubuntu/nginx.conf
-
-          # Deploy docker-compose.yml from repository and patch for production
-          echo "${ENCODED_COMPOSE}" | base64 -d > /home/ubuntu/docker-compose.yml
+          
+          # Deploy nginx.conf from repository
+          echo "ENCODED_NGINX_PLACEHOLDER" | base64 -d > /home/ubuntu/nginx.conf
+          
+          # Deploy docker-compose.yml from repository
+          echo "ENCODED_COMPOSE_PLACEHOLDER" | base64 -d > /home/ubuntu/docker-compose.yml
           
           # Production Patching: Replace build contexts with ECR images
           sed -i '/build:/,+2d' /home/ubuntu/docker-compose.yml
-          sed -i 's|container_name: nexgensis-backend|image: ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:${TAG}\n      container_name: nexgensis-backend|' /home/ubuntu/docker-compose.yml
-          sed -i 's|container_name: nexgensis-frontend|image: ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:${TAG}\n      container_name: nexgensis-frontend|' /home/ubuntu/docker-compose.yml
-
+          sed -i 's|container_name: nexgensis-backend|image: ECR_REGISTRY_PLACEHOLDER/BACKEND_REPO_PLACEHOLDER:TAG_PLACEHOLDER\n      container_name: nexgensis-backend|' /home/ubuntu/docker-compose.yml
+          sed -i 's|container_name: nexgensis-frontend|image: ECR_REGISTRY_PLACEHOLDER/FRONTEND_REPO_PLACEHOLDER:TAG_PLACEHOLDER\n      container_name: nexgensis-frontend|' /home/ubuntu/docker-compose.yml
+          
+          # Wait for cloud-init and deploy
           sudo cloud-init status --wait
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+          aws ecr get-login-password --region AWS_REGION_PLACEHOLDER | sudo docker login --username AWS --password-stdin ECR_REGISTRY_PLACEHOLDER
           sudo docker compose -f /home/ubuntu/docker-compose.yml pull
           sudo docker compose -f /home/ubuntu/docker-compose.yml up -d --remove-orphans
-          EOF
-          )
+          SCRIPT_END
 
-          # JSON-escape the script and trigger SSM
+          # Replace placeholders with actual values
+          sed -i "s|ENCODED_SECRET_PLACEHOLDER|${ENCODED_SECRET}|g" /tmp/deploy.sh
+          sed -i "s|ENCODED_NGINX_PLACEHOLDER|${ENCODED_NGINX}|g" /tmp/deploy.sh
+          sed -i "s|ENCODED_COMPOSE_PLACEHOLDER|${ENCODED_COMPOSE}|g" /tmp/deploy.sh
+          sed -i "s|ECR_REGISTRY_PLACEHOLDER|${{ env.ECR_REGISTRY }}|g" /tmp/deploy.sh
+          sed -i "s|BACKEND_REPO_PLACEHOLDER|${{ env.BACKEND_REPO }}|g" /tmp/deploy.sh
+          sed -i "s|FRONTEND_REPO_PLACEHOLDER|${{ env.FRONTEND_REPO }}|g" /tmp/deploy.sh
+          sed -i "s|TAG_PLACEHOLDER|${TAG}|g" /tmp/deploy.sh
+          sed -i "s|AWS_REGION_PLACEHOLDER|${{ env.AWS_REGION }}|g" /tmp/deploy.sh
+
+          # Send command via SSM
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters "commands=[$(echo "$FULL_SCRIPT" | jq -Rs .)]" \
+            --parameters "commands=[$(cat /tmp/deploy.sh | jq -Rs .)]" \
             --query "Command.CommandId" --output text)
 
-          # Poll for success
+          # Poll for completion
           echo "SSM Job Started: $COMMAND_ID"
           while true; do
             STATUS=$(aws ssm list-command-invocations --command-id "$COMMAND_ID" --details --query "CommandInvocations[0].Status" --output text)
-            if [ "$STATUS" == "Success" ]; then break; fi
+            [ "$STATUS" == "Success" ] && break
             if [[ "$STATUS" =~ (Failed|TimedOut|Cancelled) ]]; then
               echo "Error: Deployment $STATUS"
               aws ssm list-command-invocations --command-id "$COMMAND_ID" --details --query "CommandInvocations[0].CommandPlugins[0].Output" --output text
