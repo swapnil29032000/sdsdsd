@@ -168,8 +168,14 @@ jobs:
           # Force synchronization: Use Public IP from Infrastructure job
           IP="${{ needs.infrastructure.outputs.instance_ip }}"
           echo "Baking VITE_API_URL with IP: $IP"
-          echo "VITE_API_URL=http://$IP:8000/api" > ./frontend/.env
-          printf "%s\n" "$SELECTED_SECRET" >> ./frontend/.env
+          
+          # Write secrets first, then override VITE_API_URL specifically
+          printf "%s\n" "$SELECTED_SECRET" > ./frontend/.env
+          if grep -q "VITE_API_URL=" ./frontend/.env; then
+            sed -i "s|VITE_API_URL=.*|VITE_API_URL=http://$IP:8000/api|" ./frontend/.env
+          else
+            echo "VITE_API_URL=http://$IP:8000/api" >> ./frontend/.env
+          fi
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
