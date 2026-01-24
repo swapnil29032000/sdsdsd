@@ -7,17 +7,16 @@ on:
 
 permissions:
   id-token: write
-  contents: write
+  contents: write # Required to push state file back to repo
 
 env:
   AWS_REGION: ap-south-1
   ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
   BACKEND_REPO: nexgensis/nexgensis-backend
   FRONTEND_REPO: nexgensis/nexgensis-frontend
-  IMAGE_TAG: ${{ github.ref_name == 'main' && 'prod-latest' || github.ref_name == 'DEV' && 'dev-latest' || github.ref_name == 'QA' && 'qa-latest' || 'preprod-latest' }}
 
 jobs:
-  # Path Filter & Bootstrap Detection
+  # 0. Path Filter: Detect where changes occurred using native Git commands
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -35,68 +34,83 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Detect Changes & Bootstrap Status
+      - name: Check for directory changes & Bootstrap
         id: check
         run: |
-          # Path filtering
-          git diff --name-only HEAD^1 HEAD | grep -q "^backend/" && echo "backend=true" >> $GITHUB_OUTPUT || echo "backend=false" >> $GITHUB_OUTPUT
-          git diff --name-only HEAD^1 HEAD | grep -q "^frontend/" && echo "frontend=true" >> $GITHUB_OUTPUT || echo "frontend=false" >> $GITHUB_OUTPUT
+          # 1. Path Filtering
+          if git diff --name-only HEAD^1 HEAD | grep -q "^backend/"; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+          else
+            echo "backend=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if git diff --name-only HEAD^1 HEAD | grep -q "^frontend/"; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+          else
+            echo "frontend=false" >> $GITHUB_OUTPUT
+          fi
 
-          # Bootstrap check: Verify ECR tags exist
+          # 2. Bootstrap Check (ECR Tag Presence)
+          case "${GITHUB_REF_NAME}" in
+            DEV) TAG=dev-latest ;;
+            QA) TAG=qa-latest ;;
+            PREPROD) TAG=preprod-latest ;;
+            main) TAG=prod-latest ;;
+          esac
+
           BOOTSTRAP=false
-          aws ecr describe-images --repository-name ${{ env.BACKEND_REPO }} --image-ids imageTag=${{ env.IMAGE_TAG }} >/dev/null 2>&1 || BOOTSTRAP=true
-          aws ecr describe-images --repository-name ${{ env.FRONTEND_REPO }} --image-ids imageTag=${{ env.IMAGE_TAG }} >/dev/null 2>&1 || BOOTSTRAP=true
+          # Check backend
+          if ! aws ecr describe-images --repository-name ${{ env.BACKEND_REPO }} --image-ids imageTag=$TAG >/dev/null 2>&1; then
+            echo "Backend tag $TAG missing in ECR. Signaling Bootstrap."
+            BOOTSTRAP=true
+          fi
+          # Check frontend
+          if ! aws ecr describe-images --repository-name ${{ env.FRONTEND_REPO }} --image-ids imageTag=$TAG >/dev/null 2>&1; then
+            echo "Frontend tag $TAG missing in ECR. Signaling Bootstrap."
+            BOOTSTRAP=true
+          fi
+
           echo "bootstrap=$BOOTSTRAP" >> $GITHUB_OUTPUT
 
-  # Unified Build Job (Matrix Strategy)
-  build:
+  # 1. Build & Push Stages
+  build-backend:
     needs: [changes]
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.bootstrap == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.bootstrap == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service: [backend, frontend]
-        include:
-          - service: backend
-            context: ./backend
-          - service: frontend
-            context: ./frontend
     steps:
       - uses: actions/checkout@v4
       
-      - name: Prepare Environment
+      - name: Set Image Tag
         run: |
+          case "${GITHUB_REF_NAME}" in
+            DEV) TAG=dev-latest ;;
+            QA) TAG=qa-latest ;;
+            PREPROD) TAG=preprod-latest ;;
+            main) TAG=prod-latest ;;
+          esac
+          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
-          
-          # Select appropriate secret based on branch and service
-          if [ "${{ matrix.service }}" == "backend" ]; then
-            case "${GITHUB_REF_NAME}" in
-              main) SECRET="${{ secrets.BE_PROD_ENV }}" ;;
-              DEV) SECRET="${{ secrets.BE_DEV_ENV }}" ;;
-              QA) SECRET="${{ secrets.BE_QA_ENV }}" ;;
-              PREPROD) SECRET="${{ secrets.BE_PREPROD_ENV }}" ;;
-              *) SECRET="${{ secrets.BE_DEFAULT_ENV }}" ;;
-            esac
-            printf "%s" "$SECRET" > ${{ matrix.context }}/.env
-          else
-            case "${GITHUB_REF_NAME}" in
-              main) SECRET="${{ secrets.FE_PROD_ENV }}" ;;
-              DEV) SECRET="${{ secrets.FE_DEV_ENV }}" ;;
-              QA) SECRET="${{ secrets.FE_QA_ENV }}" ;;
-              PREPROD) SECRET="${{ secrets.FE_PREPROD_ENV }}" ;;
-              *) SECRET="${{ secrets.FE_DEFAULT_ENV }}" ;;
-            esac
-            echo "VITE_API_URL=/api" > ${{ matrix.context }}/.env
-            printf "%s\n" "$SECRET" >> ${{ matrix.context }}/.env
-          fi
 
-      - name: Configure AWS & ECR
+      - name: Inject Build-Time Secrets (with Fallback)
+        run: |
+          if [ "${GITHUB_REF_NAME}" == "main" ]; then SELECTED_SECRET="${{ secrets.BE_PROD_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "DEV" ]; then SELECTED_SECRET="${{ secrets.BE_DEV_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "QA" ]; then SELECTED_SECRET="${{ secrets.BE_QA_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "PREPROD" ]; then SELECTED_SECRET="${{ secrets.BE_PREPROD_ENV }}"; fi
+          
+          if [ -z "$SELECTED_SECRET" ] || [ "$SELECTED_SECRET" == "null" ]; then
+            SELECTED_SECRET="${{ secrets.BE_DEFAULT_ENV }}"
+          fi
+          
+          printf "%s" "$SELECTED_SECRET" > ./backend/.env
+
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to ECR
+      - name: Login & Prepare ECR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.ECR_REGISTRY }}
@@ -104,21 +118,82 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Ensure ECR Repository
-        run: aws ecr describe-repositories --repository-names nexgensis/nexgensis-${{ matrix.service }} || aws ecr create-repository --repository-name nexgensis/nexgensis-${{ matrix.service }}
+      - name: Sync Repository
+        run: aws ecr describe-repositories --repository-names ${{ env.BACKEND_REPO }} || aws ecr create-repository --repository-name ${{ env.BACKEND_REPO }}
 
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
-          context: ${{ matrix.context }}
+          context: ./backend
           push: true
           tags: |
-            ${{ env.ECR_REGISTRY }}/nexgensis/nexgensis-${{ matrix.service }}:${{ env.IMAGE_TAG }}
-            ${{ env.ECR_REGISTRY }}/nexgensis/nexgensis-${{ matrix.service }}:${{ env.SHORT_SHA }}
+            ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:${{ env.IMAGE_TAG }}
+            ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:${{ env.SHORT_SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Infrastructure Provisioning
+  build-frontend:
+    needs: [changes, infrastructure]
+    if: (needs.changes.outputs.frontend == 'true' || needs.infrastructure.outputs.ip_changed == 'true' || needs.changes.outputs.bootstrap == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set Image Tag
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            DEV) TAG=dev-latest ;;
+            QA) TAG=qa-latest ;;
+            PREPROD) TAG=preprod-latest ;;
+            main) TAG=prod-latest ;;
+          esac
+          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Inject Build-Time IP & Secrets
+        run: |
+          if [ "${GITHUB_REF_NAME}" == "main" ]; then SELECTED_SECRET="${{ secrets.FE_PROD_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "DEV" ]; then SELECTED_SECRET="${{ secrets.FE_DEV_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "QA" ]; then SELECTED_SECRET="${{ secrets.FE_QA_ENV }}"; fi
+          if [ "${GITHUB_REF_NAME}" == "PREPROD" ]; then SELECTED_SECRET="${{ secrets.FE_PREPROD_ENV }}"; fi
+          
+          if [ -z "$SELECTED_SECRET" ] || [ "$SELECTED_SECRET" == "null" ]; then
+            SELECTED_SECRET="${{ secrets.FE_DEFAULT_ENV }}"
+          fi
+          
+          # Use relative path for Ultimate Gateway
+          echo "VITE_API_URL=/api" > ./frontend/.env
+          printf "%s\n" "$SELECTED_SECRET" >> ./frontend/.env
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login & Prepare ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ECR_REGISTRY }}
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Sync Repository
+        run: aws ecr describe-repositories --repository-names ${{ env.FRONTEND_REPO }} || aws ecr create-repository --repository-name ${{ env.FRONTEND_REPO }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ env.IMAGE_TAG }}
+            ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ env.SHORT_SHA }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 2. Infrastructure Stage
   infrastructure:
     runs-on: ubuntu-latest
     outputs:
@@ -139,7 +214,7 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Terraform Apply & IP Drift Detection
+      - name: Git State Sync & Terraform Apply
         id: apply
         working-directory: ./terraform
         run: |
@@ -147,7 +222,9 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git pull origin ${{ github.ref_name }}
           
+          # Capture OLD IP for drift detection
           OLD_IP=$(grep -oP '"public_ip":\s*"\K[^"]+' terraform.tfstate || echo "none")
+          echo "Last Known IP: $OLD_IP"
           
           terraform init
           terraform apply -auto-approve \
@@ -159,21 +236,29 @@ jobs:
           NEW_IP=$(terraform output -raw instance_public_ip)
           echo "instance_ip=$NEW_IP" >> $GITHUB_OUTPUT
           
-          [ "$OLD_IP" != "$NEW_IP" ] && echo "ip_changed=true" >> $GITHUB_OUTPUT || echo "ip_changed=false" >> $GITHUB_OUTPUT
+          # Signal IP Change
+          if [ "$OLD_IP" != "$NEW_IP" ]; then
+            echo "IP DRIFT DETECTED: $OLD_IP -> $NEW_IP"
+            echo "ip_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "IP PERSISTENT: $NEW_IP"
+            echo "ip_changed=false" >> $GITHUB_OUTPUT
+          fi
           
-          git status --short | grep -q "terraform.tfstate" && {
+          if git status --short | grep -q "terraform.tfstate"; then
             git add terraform.tfstate
             git commit -m "chore: update terraform state [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
-          } || true
+          fi
 
-  # Application Deployment
+  # 4. Deployment Stage
   deploy:
-    needs: [infrastructure, build]
+    needs: [infrastructure, build-backend, build-frontend]
     if: always() && needs.infrastructure.result == 'success'
     runs-on: ubuntu-latest
     env:
-      BE_SECRET: ${{ github.ref_name == 'main' && secrets.BE_PROD_ENV || github.ref_name == 'DEV' && secrets.BE_DEV_ENV || github.ref_name == 'QA' && secrets.BE_QA_ENV || github.ref_name == 'PREPROD' && secrets.BE_PREPROD_ENV || secrets.BE_DEFAULT_ENV }}
+      BE_SECRET: ${{ secrets.BE_PROD_ENV || secrets.BE_DEFAULT_ENV }} # Simplify secret selection
+      TAG: ${{ github.ref_name == 'main' && 'prod-latest' || github.ref_name == 'DEV' && 'dev-latest' || github.ref_name == 'QA' && 'qa-latest' || 'preprod-latest' }}
     steps:
       - uses: actions/checkout@v4
       
@@ -183,33 +268,47 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AssumeRoleWithAction
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy via SSM
+      - name: Orchestrate SSM Deployment
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances --filters "Name=ip-address,Values=${{ needs.infrastructure.outputs.instance_ip }}" --query "Reservations[*].Instances[*].InstanceId" --output text)
+          echo "Target Instance: $INSTANCE_ID"
 
           # Wait for SSM Agent
           for i in {1..15}; do
             STATUS=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" --query "InstanceInformationList[0].PingStatus" --output text)
-            [ "$STATUS" == "Online" ] && break
+            if [ "$STATUS" == "Online" ]; then break; fi
             sleep 10
           done
 
-          # Encode configurations
+          # Build the script as an environment variable to avoid quoting chaos
+          # We use heredoc here but we'll pipe it to jq for JSON stringification
           ENCODED_SECRET=$(echo "${BE_SECRET}" | base64 -w 0)
           ENCODED_NGINX=$(base64 -w 0 < nginx.conf)
           ENCODED_COMPOSE=$(base64 -w 0 < docker-compose.yml)
           
+          # Use a variable on the runner to hold the full script
           FULL_SCRIPT=$(cat <<EOF
           set -e
           mkdir -p /home/ubuntu
           echo "${ENCODED_SECRET}" | base64 -d > /home/ubuntu/.env
-          grep -q "ALLOWED_HOSTS" /home/ubuntu/.env && sed -i "s|ALLOWED_HOSTS=.*|ALLOWED_HOSTS=*|" /home/ubuntu/.env || echo "ALLOWED_HOSTS=*" >> /home/ubuntu/.env
+
+          # Fix ALLOWED_HOSTS for Gateway connectivity
+          if ! grep -q "ALLOWED_HOSTS" /home/ubuntu/.env; then
+            echo "ALLOWED_HOSTS=*" >> /home/ubuntu/.env
+          else
+            sed -i "s|ALLOWED_HOSTS=.*|ALLOWED_HOSTS=*|" /home/ubuntu/.env
+          fi
+
+          # Deploy static nginx.conf from repository
           echo "${ENCODED_NGINX}" | base64 -d > /home/ubuntu/nginx.conf
+
+          # Deploy docker-compose.yml from repository and patch for production
           echo "${ENCODED_COMPOSE}" | base64 -d > /home/ubuntu/docker-compose.yml
           
+          # Production Patching: Replace build contexts with ECR images
           sed -i '/build:/,+2d' /home/ubuntu/docker-compose.yml
-          sed -i 's|container_name: nexgensis-backend|image: ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:${{ env.IMAGE_TAG }}\n      container_name: nexgensis-backend|' /home/ubuntu/docker-compose.yml
-          sed -i 's|container_name: nexgensis-frontend|image: ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ env.IMAGE_TAG }}\n      container_name: nexgensis-frontend|' /home/ubuntu/docker-compose.yml
+          sed -i 's|container_name: nexgensis-backend|image: ${{ env.ECR_REGISTRY }}/${{ env.BACKEND_REPO }}:${TAG}\n      container_name: nexgensis-backend|' /home/ubuntu/docker-compose.yml
+          sed -i 's|container_name: nexgensis-frontend|image: ${{ env.ECR_REGISTRY }}/${{ env.FRONTEND_REPO }}:${TAG}\n      container_name: nexgensis-frontend|' /home/ubuntu/docker-compose.yml
 
           sudo cloud-init status --wait
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
@@ -218,30 +317,33 @@ jobs:
           EOF
           )
 
+          # JSON-escape the script and trigger SSM
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --parameters "commands=[$(echo "$FULL_SCRIPT" | jq -Rs .)]" \
             --query "Command.CommandId" --output text)
 
-          # Poll for completion
+          # Poll for success
+          echo "SSM Job Started: $COMMAND_ID"
           while true; do
             STATUS=$(aws ssm list-command-invocations --command-id "$COMMAND_ID" --details --query "CommandInvocations[0].Status" --output text)
-            [ "$STATUS" == "Success" ] && break
-            [[ "$STATUS" =~ (Failed|TimedOut|Cancelled) ]] && {
-              echo "Deployment $STATUS"
+            if [ "$STATUS" == "Success" ]; then break; fi
+            if [[ "$STATUS" =~ (Failed|TimedOut|Cancelled) ]]; then
+              echo "Error: Deployment $STATUS"
               aws ssm list-command-invocations --command-id "$COMMAND_ID" --details --query "CommandInvocations[0].CommandPlugins[0].Output" --output text
               exit 1
-            }
+            fi
             sleep 15
           done
 
-      - name: 🚀 Deployment Summary
+      - name: 🚀 DEPLOYMENT SUCCESS
         if: success()
         run: |
-          echo "=========================================="
-          echo "✨ DEPLOYMENT SUCCESSFUL ✨"
-          echo "=========================================="
-          echo "🌍 App:  http://${{ needs.infrastructure.outputs.instance_ip }}"
-          echo "⚙️  API:  http://${{ needs.infrastructure.outputs.instance_ip }}:8000/api/hello/"
-          echo "=========================================="
+          IP="${{ needs.infrastructure.outputs.instance_ip }}"
+          echo "=========================================================="
+          echo "✨ INFRASTRUCTURE & GATEWAY READY ✨"
+          echo "=========================================================="
+          echo "🌍 Portal:  http://$IP"
+          echo "⚙️  API:     http://$IP/api/hello/"
+          echo "=========================================================="
