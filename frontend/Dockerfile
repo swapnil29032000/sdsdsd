@@ -27,6 +27,8 @@ RUN useradd -m nodejs
 
 # Copy only the static build assets
 COPY --from=builder /app/dist ./dist
+# Add .env at final stage for better debugging
+COPY --from=builder /app/.env* ./
 
 # Ensure the non-root user owns the app directory
 RUN chown -R nodejs:nodejs /app
