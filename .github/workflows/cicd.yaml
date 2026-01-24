@@ -148,10 +148,9 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-frontend:
-    needs: [changes, infrastructure]
+    needs: [changes]
     if: |
       (needs.changes.outputs.frontend == 'true' || 
-       needs.infrastructure.outputs.ip_changed == 'true' || 
        needs.changes.outputs.bootstrap == 'true' || 
        github.event_name == 'workflow_dispatch' && inputs.force_frontend ||
        github.event.inputs.force_frontend == 'true')
@@ -182,8 +181,7 @@ jobs:
           fi
           
           # Use relative path for Ultimate Gateway
-          echo "VITE_API_URL=/api" > ./frontend/.env
-          printf "%s\n" "$SELECTED_SECRET" >> ./frontend/.env
+            printf "%s\n" "$SELECTED_SECRET" >> ./frontend/.env
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -303,8 +301,14 @@ jobs:
             sleep 10
           done
 
+          # Prepare nginx.conf with domain from secrets
+          DOMAIN="${{ secrets.APP_DOMAIN }}"
+          
+          # Replace domain placeholder in nginx.conf
+          sed "s|DOMAIN_PLACEHOLDER|$DOMAIN|g" nginx.conf > /tmp/nginx.conf
+          
           # Encode nginx.conf for transmission
-          ENCODED_NGINX=$(base64 -w 0 < nginx.conf)
+          ENCODED_NGINX=$(base64 -w 0 < /tmp/nginx.conf)
 
           # Trigger Command
           COMMAND_ID=$(aws ssm send-command \
