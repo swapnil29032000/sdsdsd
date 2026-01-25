@@ -8,11 +8,14 @@ function App() {
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Use environment variable for API URL with fallback
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
   const fetchData = async () => {
     setLoading(true)
     setError(null)
     try {
-      const response = await axios.get('http://localhost:8000/api/hello/')
+      const response = await axios.get(`${API_URL}/api/hello/`)
       setMessage(response.data.message)
     } catch (err) {
       console.error(err)
