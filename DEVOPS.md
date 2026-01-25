@@ -29,3 +29,9 @@ for a full-stack application.
 ### Run Locally
 ```bash
 docker compose up --build
+
+## Infrastructure as Code (Terraform)
+
+- Used Terraform to provision AWS EC2
+- Defined Security Groups, EC2, and User Data
+- Automated Docker installation via user_data
