@@ -83,7 +83,7 @@ terraform plan
 terraform apply
 ```
 
-## ⚙️ GitHub Actions CI/CD
+## GitHub Actions CI/CD
 
 GitHub Actions automates Docker image build, push, and Terraform validation on every push to the `main` branch, ensuring consistent deployments and early infrastructure validation.
 
