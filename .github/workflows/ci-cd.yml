@@ -21,10 +21,10 @@ jobs:
 
       - name: Build & Push Backend
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/devops-assessment-backend ./backend
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/devops-assessment-backend
+          docker build -t karthik0738/devops-assessment-backend ./backend
+          docker push dckr_pat_a8VnhAMYiYzrdrcOgAr5uoiM3T8/devops-assessment-backend
 
       - name: Build & Push Frontend
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/devops-assessment-frontend ./frontend
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/devops-assessment-frontend
+          docker build -t karthik0738/devops-assessment-frontend ./frontend
+          docker push dckr_pat_a8VnhAMYiYzrdrcOgAr5uoiM3T8/devops-assessment-frontend
