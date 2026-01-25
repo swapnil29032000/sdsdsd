@@ -22,3 +22,20 @@ services:
       - ./frontend:/app
     ports:
       - "3000:3000"
+    build:
+      context: ./backend
+    container_name: django-backend
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./backend:/app
+    command: python manage.py runserver 0.0.0.0:8000
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: react-frontend
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend (Add CI/CD pipeline and Docker setup)
