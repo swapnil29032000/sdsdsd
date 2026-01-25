@@ -1,0 +1,13 @@
+# AWS Infrastructure Settings
+aws_region    = "us-east-1"
+instance_type = "t2.micro"
+instance_name = "devops-assessment-vm"
+
+# SSH Settings
+# Create this key pair in your AWS Console before running terraform apply
+key_name      = "your-key-pair-name"
+
+# AMI ID (Ubuntu 22.04 LTS)
+# us-east-1: ami-0c7217cdde317cfec
+# us-west-2: ami-03f65b8614a860c29
+# ami_id      = "ami-0c7217cdde317cfec"

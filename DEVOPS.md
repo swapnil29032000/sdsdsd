@@ -346,6 +346,44 @@ Two workflows are configured:
 
 ---
 
+## 🏗️ Infrastructure as Code (IaC) - Bonus
+
+We use **Terraform** to automate the provisioning of cloud infrastructure (AWS).
+
+### Provisioned Resources:
+- **VPC & Networking**: Custom VPC, subnets, and internet gateway.
+- **Security Group**: Ingress rules for port **22 (SSH)**, **80 (HTTP)**, and **443 (HTTPS)**.
+- **EC2 Instance**: Ubuntu 22.04 VM with Docker pre-installed via `user_data`.
+
+### How to use Terraform:
+
+1. **Navigate to terraform directory:**
+   ```bash
+   cd terraform
+   ```
+
+2. **Setup variables:**
+   ```bash
+   cp terraform.tfvars.example terraform.tfvars
+   # Edit terraform.tfvars with your key_name and region
+   ```
+
+3. **Initialize and Plan:**
+   ```bash
+   terraform init
+   terraform plan
+   ```
+
+4. **Apply Infrastructure:**
+   ```bash
+   terraform apply
+   ```
+
+5. **Access the Public IP:**
+   The output will display the `instance_public_ip`. Use this IP to access your deployed application.
+
+---
+
 ## 🔧 Environment Variables
 
 ### Backend Environment Variables
