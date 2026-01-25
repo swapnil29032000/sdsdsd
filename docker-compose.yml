@@ -37,5 +37,3 @@ services:
     container_name: react-frontend
     ports:
       - "3001:80"
-    depends_on:
-      - backend (Add CI/CD pipeline and Docker setup)
