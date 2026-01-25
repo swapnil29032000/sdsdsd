@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments (VERY IMPORTANT)
+venv/
+.venv/
+env/
+
+# Git
+.git/
+.gitignore
+
+# Frontend / build junk (safe even if not present)
+node_modules/
+dist/
+build/
+
+# Local DB
+*.sqlite3
