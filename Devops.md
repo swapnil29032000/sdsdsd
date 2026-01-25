@@ -1,6 +1,6 @@
-# 🐳 Docker-Based DevOps Deployment (with Terraform & CI/CD)
+# Docker-Based DevOps Deployment (with Terraform & CI/CD)
 
-## 📌 Overview
+## Overview
 This document describes the **Docker-based deployment strategy** for a full-stack application, enhanced with **CI/CD automation using GitHub Actions** and **Infrastructure as Code (IaC) using Terraform**.
 
 The focus of this setup includes:
@@ -11,7 +11,7 @@ The focus of this setup includes:
 
 ---
 
-## 🧩 Application Stack
+## Application Stack
 
 - **Backend:** Django (REST API)
 - **Frontend:** React (Vite + TypeScript)
@@ -23,7 +23,7 @@ The focus of this setup includes:
 
 ---
 
-## 🛠 Docker Containerization
+##  Docker Containerization
 
 ### Backend (Django)
 - Dockerized using a **Python slim base image**
@@ -39,7 +39,7 @@ The focus of this setup includes:
 
 ---
 
-## 🔗 Docker Compose Orchestration
+##  Docker Compose Orchestration
 
 - `docker-compose.yml` is used to manage multi-container deployment
 - Backend and frontend run as **separate services**
@@ -55,7 +55,7 @@ The focus of this setup includes:
 
 ---
 
-## ▶️ Run Application Using Docker
+## Run Application Using Docker
 
 ### Prerequisites
 - Docker
@@ -65,7 +65,7 @@ The focus of this setup includes:
 ```bash
 docker compose up --build
 ```
-## ☁️ Terraform (Infrastructure as Code)
+## Terraform (Infrastructure as Code)
 
 Terraform is used alongside Docker to provision and manage cloud infrastructure required for deployment.
 
@@ -82,3 +82,8 @@ terraform validate
 terraform plan
 terraform apply
 ```
+
+## ⚙️ GitHub Actions CI/CD
+
+GitHub Actions automates Docker image build, push, and Terraform validation on every push to the `main` branch, ensuring consistent deployments and early infrastructure validation.
+
