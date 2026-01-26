@@ -1,60 +1,31 @@
-# DevOps Assessment Application
+- # DevOps Assessment – Nexgensis
 
-A simple "Hello World" full-stack application built with **Django** (Backend) and **React with Vite** (Frontend).
+## Overview
+This project demonstrates Docker-based deployment of a frontend and backend application on AWS EC2.
 
-## Project Overview
+## Tech Stack
+- Frontend: React + Vite + Nginx
+- Backend: Django REST Framework
+- Containerization: Docker
+- Orchestration: Docker Compose
+- Cloud Platform: AWS EC2 (Ubuntu)
 
-- **Backend**: Django 6.0 (REST API)
-- **Frontend**: React (Vite, TypeScript, Lucide Icons)
-- **Styling**: Premium custom CSS with dark/light mode support.
-- **Communication**: REST API using Axios with CORS enabled.
+## Application Ports
+- Frontend: 3000
+- Backend: 8000
 
-## Getting Started
+## Run Locally
+docker-compose up --build
 
-### Prerequisites
-- Python 3.10+
-- Node.js 18+
-- npm 9+
+## AWS Deployment
+- EC2 instance with Docker and Docker Compose installed
+- Security groups allow ports 3000 and 8000
+- Containers managed using Docker Compose
 
-### Backend Setup (Django)
+## Backend Routing
+- API endpoints available under `/api`
+- Root URL intentionally returns 404 (API-only service)
 
-1. Navigate to the backend directory:
-   ```bash
-   cd backend
-   ```
-2. Create and activate a virtual environment:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install django django-cors-headers psycopg2-binary
-   ```
-4. Run the development server:
-   ```bash
-   python manage.py runserver
-   ```
-   The backend will be available at `http://localhost:8000/api/hello/`.
+## Status
+Frontend and backend containers are running successfully on AWS EC2.
 
-### Frontend Setup (React/Vite)
-
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Run the development server:
-   ```bash
-   npm run dev
-   ```
-   The frontend will be available at `http://localhost:5173/`.
-
-## Architecture Decisions
-- **Vite**: Used for its superior development experience and fast build times.
-- **Django**: Chosen for its robustness and ease of setting up a structured API.
-- **CORS**: Configured in Django to allow the React frontend to fetch data during local development.
-- **Responsive Design**: Custom CSS ensures the application looks premium on all screen sizes and supports dark mode.
