@@ -16,7 +16,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: ${{ docker login -u abhishek231805 }}
-          password: ${{ docker login -u abhishek231805}}
+          password: ${{ dckr_pat_U92Zg3ptT9E3-rJHgGv37m92T_A}}
 
       - name: Build & Push Backend
         run: |
