@@ -58,3 +58,21 @@ A simple "Hello World" full-stack application built with **Django** (Backend) an
 - **Django**: Chosen for its robustness and ease of setting up a structured API.
 - **CORS**: Configured in Django to allow the React frontend to fetch data during local development.
 - **Responsive Design**: Custom CSS ensures the application looks premium on all screen sizes and supports dark mode.
+
+---
+
+## Infrastructure & Deployment
+
+The production environment is managed with a modern, secure DevOps stack:
+
+- **IaC**: Terraform (Modular design for VPC, IAM, and EC2).
+- **State Management**: Git-Based (State is versioned in the repository for 100% idempotency).
+- **Deployment**: SSH-less (via AWS Systems Manager - SSM).
+- **CI/CD**: Unified GitHub Actions pipeline with path-based builds and auto-scaling.
+- **Orchestration**: Docker Compose (current) | Kubernetes-ready architecture with enterprise Helm charts.
+
+📖 **For detailed CI/CD architecture and workflow patterns**, see **[DEVOPS.md](DEVOPS.md)**.
+
+☸️ **For Kubernetes & Helm expertise showcase**, see **[KUBERNETES.md](KUBERNETES.md)** — demonstrating advanced templating, blue-green deployments, and production-grade orchestration patterns.
+
+For detailed setup and troubleshooting, see the **[DevOps Guide](DEVOPS.md)** and **[Challenges Documentation](CHALLENGES.md)**.

@@ -1,0 +1,51 @@
+services:
+  nginx:
+    image: nginx:stable-alpine
+    container_name: nexgensis-gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - nexgensis-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nexgensis-backend
+    expose:
+      - "8000"
+    env_file:
+      - .env
+    volumes:
+      - backend_data:/app
+    restart: unless-stopped
+    networks:
+      - nexgensis-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nexgensis-frontend
+    expose:
+      - "5173"
+    environment:
+      - VITE_API_URL=/api
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - nexgensis-network
+
+volumes:
+  backend_data:
+
+networks:
+  nexgensis-network:
+    driver: bridge

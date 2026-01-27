@@ -1,0 +1,7 @@
+ecr_registry      = "123456789012.dkr.ecr.ap-south-1.amazonaws.com"
+aws_region        = "ap-south-1"
+frontend_image_tag = "prod-latest"
+backend_image_tag  = "prod-latest"
+frontend_repo_name = "nexgensis/nexgensis-frontend"
+backend_repo_name  = "nexgensis/nexgensis-backend"
+key_name           = "my-aws"
